@@ -186,9 +186,109 @@ For normalized names, use format: {Brand/Product} – {Flavor/Variant}`,
     }
 
     // Determine parse status
-    const extractedCount = parsed.items?.length || 0;
-    const headerCount = parsed.item_count || extractedCount;
-    const parseStatus = extractedCount < headerCount ? "PARTIAL_PARSE" : "PARSED";
+    let extractedItems = parsed.items || [];
+    const headerCount = parsed.item_count || extractedItems.length;
+
+    // OCR fallback: if we got fewer items than expected, retry with vision-focused prompt
+    if (extractedItems.length < headerCount) {
+      console.log(`Partial parse: got ${extractedItems.length} of ${headerCount} items. Running OCR fallback...`);
+      try {
+        const ocrResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${lovableApiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "google/gemini-2.5-pro",
+            messages: [
+              {
+                role: "system",
+                content: `You are an OCR specialist. The previous text-based extraction of this receipt only found ${extractedItems.length} of ${headerCount} items. Visually inspect every line of the receipt image and extract ALL line items, including ones that may have unusual formatting. Return every item you can see.`,
+              },
+              {
+                role: "user",
+                content: [
+                  {
+                    type: "file",
+                    file: {
+                      filename: "receipt.pdf",
+                      file_data: `data:application/pdf;base64,${base64}`,
+                    },
+                  },
+                  {
+                    type: "text",
+                    text: "Extract ALL line items from this receipt. Include every product line you can see.",
+                  },
+                ],
+              },
+            ],
+            tools: [
+              {
+                type: "function",
+                function: {
+                  name: "extract_receipt",
+                  description: "Extract structured data from a receipt",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      items: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            raw_name: { type: "string" },
+                            normalized_name: { type: "string" },
+                            qty: { type: "integer" },
+                            pack_size: { type: "integer" },
+                            pack_size_uom: { type: "string" },
+                            line_total: { type: "number" },
+                            unit_cost: { type: "number" },
+                          },
+                          required: ["raw_name", "qty", "line_total"],
+                          additionalProperties: false,
+                        },
+                      },
+                    },
+                    required: ["items"],
+                    additionalProperties: false,
+                  },
+                },
+              },
+            ],
+            tool_choice: { type: "function", function: { name: "extract_receipt" } },
+          }),
+        });
+
+        if (ocrResponse.ok) {
+          const ocrResult = await ocrResponse.json();
+          const ocrToolCall = ocrResult.choices?.[0]?.message?.tool_calls?.[0];
+          if (ocrToolCall) {
+            const ocrParsed = JSON.parse(ocrToolCall.function.arguments);
+            const ocrItems = ocrParsed.items || [];
+
+            // Merge: add OCR items not already in first pass (dedupe by raw_name + line_total)
+            const existingKeys = new Set(
+              extractedItems.map((i: any) => `${i.raw_name.toLowerCase().trim()}|${i.line_total}`)
+            );
+            for (const ocrItem of ocrItems) {
+              const key = `${ocrItem.raw_name.toLowerCase().trim()}|${ocrItem.line_total}`;
+              if (!existingKeys.has(key)) {
+                extractedItems.push(ocrItem);
+                existingKeys.add(key);
+              }
+            }
+            console.log(`After OCR merge: ${extractedItems.length} items (target: ${headerCount})`);
+          }
+        } else {
+          console.error("OCR fallback failed:", ocrResponse.status);
+        }
+      } catch (ocrErr) {
+        console.error("OCR fallback error:", ocrErr);
+      }
+    }
+
+    const parseStatus = extractedItems.length >= headerCount ? "PARSED" : "PARTIAL_PARSE";
 
     // Update receipt header
     await supabase.from("receipts").update({
@@ -211,8 +311,8 @@ For normalized names, use format: {Brand/Product} – {Flavor/Variant}`,
       .eq("skus.user_id", receiptData.user_id);
 
     // Insert receipt items
-    if (parsed.items && parsed.items.length > 0) {
-      const itemsToInsert = parsed.items.map((item: any) => {
+    if (extractedItems.length > 0) {
+      const itemsToInsert = extractedItems.map((item: any) => {
         // Try fuzzy match against aliases
         let matchedSkuId = null;
         let matchedPackSize = item.pack_size || null;
