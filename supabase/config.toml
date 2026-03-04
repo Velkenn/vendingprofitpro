@@ -1,0 +1,7 @@
+project_id = "xiftzkgxdibxbngixflf"
+
+[functions.parse-receipt]
+verify_jwt = false
+
+[functions.seed-skus]
+verify_jwt = false
