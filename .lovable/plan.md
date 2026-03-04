@@ -1,21 +1,28 @@
 
 
-## Add Delete Receipt Functionality
+## Make Needs Review Items Interactive
 
-### What
-Add a delete button on the Receipt Detail page with a confirmation dialog. Deleting a receipt will remove the receipt row and all associated `receipt_items` (cascade handled by DB, but we'll also delete the stored PDF from the storage bucket).
+Currently the Needs Review page is read-only -- items are displayed but cannot be tapped or edited. The purpose of this queue is to let users resolve items that need SKU mapping or corrections.
 
 ### Changes
 
-**`src/pages/ReceiptDetail.tsx`**
-- Import `AlertDialog` components and `Trash2` icon
-- Add a `deleting` state and `handleDelete` function that:
-  1. Deletes the PDF from the `receipts` storage bucket (if `receipt.pdf_url` exists)
-  2. Deletes all `receipt_items` where `receipt_id = id`
-  3. Deletes the receipt row itself
-  4. Shows a success toast and navigates back to `/receipts`
-- Add a red "Delete" button in the receipt header card (next to the badge)
-- Wrap it in an `AlertDialog` confirmation: "Delete this receipt? This will permanently remove the receipt and all its line items."
+**`src/pages/NeedsReview.tsx`** -- Full rework to make each item actionable:
 
-No database migration needed — RLS already allows users to delete their own receipts and receipt_items.
+1. **Tappable cards** -- Each item card becomes clickable, expanding an inline edit form (or navigating to the parent receipt detail).
+
+2. **Inline resolution form** per item with:
+   - **Normalized name** -- editable text field (pre-filled with `raw_name`)
+   - **SKU mapping** -- a searchable dropdown of existing SKUs from the `skus` table. Selecting one sets `sku_id` on the item.
+   - **Mark as personal** toggle (`is_personal`)
+   - **Qty / Pack size / Line total** -- editable fields
+   - **"Approve" button** -- saves changes, sets `needs_review = false`, removes item from the list
+   - **"Skip" button** -- collapse without saving
+
+3. **Fetch SKUs** on mount for the dropdown options (query `skus` table ordered by `sku_name`).
+
+4. **On approve**: Update the `receipt_items` row with edited fields + `needs_review: false`, then remove it from the local list with a toast confirmation.
+
+5. **Count badge** in the header showing total items remaining.
+
+This keeps the workflow minimal-tap: open page, tap item, pick SKU or edit name, hit Approve -- done.
 
