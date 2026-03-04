@@ -6,8 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ArrowLeft, AlertTriangle, Plus, X } from "lucide-react";
+import { ArrowLeft, AlertTriangle, Plus, X, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Tables } from "@/integrations/supabase/types";
 import { format } from "date-fns";
@@ -22,6 +26,7 @@ export default function ReceiptDetail() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newItem, setNewItem] = useState({ raw_name: "", qty: 1, pack_size: "", line_total: "" });
   const [adding, setAdding] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const loadData = () => {
     if (!id) return;
@@ -53,6 +58,27 @@ export default function ReceiptDetail() {
       toast({ title: "Error", description: err.message, variant: "destructive" });
     } finally {
       setAdding(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!id) return;
+    setDeleting(true);
+    try {
+      // Delete PDF from storage if exists
+      if (receipt?.pdf_url) {
+        const path = receipt.pdf_url.split("/receipts/")[1];
+        if (path) await supabase.storage.from("receipts").remove([path]);
+      }
+      // Delete receipt row (receipt_items cascade via FK)
+      const { error } = await supabase.from("receipts").delete().eq("id", id);
+      if (error) throw error;
+      toast({ title: "Receipt deleted" });
+      navigate("/receipts");
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -92,7 +118,30 @@ export default function ReceiptDetail() {
             <CardTitle className="text-lg capitalize">
               {receipt.vendor === "sams" ? "Sam's Club" : "Walmart"}
             </CardTitle>
-            <Badge variant="secondary">{receipt.parse_status}</Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary">{receipt.parse_status}</Badge>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:text-destructive">
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Delete this receipt?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will permanently remove the receipt and all its line items.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleDelete} disabled={deleting} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                      {deleting ? "Deleting..." : "Delete"}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-1 text-sm">
