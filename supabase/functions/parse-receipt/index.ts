@@ -32,9 +32,15 @@ serve(async (req) => {
       });
     }
 
-    // Convert PDF to base64 for AI
+    // Convert PDF to base64 for AI (chunked to avoid stack overflow)
     const arrayBuffer = await fileData.arrayBuffer();
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+    const bytes = new Uint8Array(arrayBuffer);
+    let binary = "";
+    const chunkSize = 8192;
+    for (let i = 0; i < bytes.length; i += chunkSize) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+    }
+    const base64 = btoa(binary);
 
     if (!lovableApiKey) {
       await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
