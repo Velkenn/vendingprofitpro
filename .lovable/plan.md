@@ -1,23 +1,28 @@
 
 
-## Auto-approve previously reviewed items on new receipts
+## Make Needs Review Items Interactive
 
-Currently, the `parse-receipt` edge function only matches items against `sku_aliases`. Items that were manually reviewed and mapped to SKUs on previous receipts still get flagged as `needs_review = true` on subsequent uploads.
+Currently the Needs Review page is read-only -- items are displayed but cannot be tapped or edited. The purpose of this queue is to let users resolve items that need SKU mapping or corrections.
 
-### Fix: Match against historical receipt_items
+### Changes
 
-**Edit `supabase/functions/parse-receipt/index.ts`**
+**`src/pages/NeedsReview.tsx`** -- Full rework to make each item actionable:
 
-After fetching `sku_aliases`, also query distinct `(raw_name, sku_id, is_personal)` pairs from `receipt_items` where `needs_review = false` and `sku_id IS NOT NULL` for this user. Use these as a secondary matching source.
+1. **Tappable cards** -- Each item card becomes clickable, expanding an inline edit form (or navigating to the parent receipt detail).
 
-During item insertion, the matching logic becomes:
+2. **Inline resolution form** per item with:
+   - **Normalized name** -- editable text field (pre-filled with `raw_name`)
+   - **SKU mapping** -- a searchable dropdown of existing SKUs from the `skus` table. Selecting one sets `sku_id` on the item.
+   - **Mark as personal** toggle (`is_personal`)
+   - **Qty / Pack size / Line total** -- editable fields
+   - **"Approve" button** -- saves changes, sets `needs_review = false`, removes item from the list
+   - **"Skip" button** -- collapse without saving
 
-1. Check `sku_aliases` first (existing behavior)
-2. If no alias match, check if `raw_name` (case-insensitive) matches a previously reviewed item
-3. If matched, carry forward: `sku_id`, `is_personal`, and the most recent `pack_size`
-4. Only set `needs_review = true` if neither source matched
+3. **Fetch SKUs** on mount for the dropdown options (query `skus` table ordered by `sku_name`).
 
-This means once a user reviews "Premier Protein 18pk" and maps it to a SKU, every future receipt with that same raw name will be auto-approved with the same SKU, personal flag, and pack size.
+4. **On approve**: Update the `receipt_items` row with edited fields + `needs_review: false`, then remove it from the local list with a toast confirmation.
 
-### No database or frontend changes needed
+5. **Count badge** in the header showing total items remaining.
+
+This keeps the workflow minimal-tap: open page, tap item, pick SKU or edit name, hit Approve -- done.
 
