@@ -50,68 +50,6 @@ const EXTRACT_TOOL = {
   },
 };
 
-const ITEMS_ONLY_TOOL = {
-  type: "function",
-  function: {
-    name: "extract_receipt",
-    description: "Extract structured data from a receipt",
-    parameters: {
-      type: "object",
-      properties: {
-        items: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              raw_name: { type: "string" },
-              normalized_name: { type: "string" },
-              qty: { type: "integer" },
-              pack_size: { type: "integer" },
-              pack_size_uom: { type: "string" },
-              line_total: { type: "number" },
-              unit_cost: { type: "number" },
-            },
-            required: ["raw_name", "qty", "line_total"],
-            additionalProperties: false,
-          },
-        },
-      },
-      required: ["items"],
-      additionalProperties: false,
-    },
-  },
-};
-
-async function callAI(apiKey: string, model: string, systemPrompt: string, base64: string, tools: any[], maxTokens: number) {
-  const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokens,
-      messages: [
-        { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: [
-            {
-              type: "file",
-              file: { filename: "receipt.pdf", file_data: `data:application/pdf;base64,${base64}` },
-            },
-            { type: "text", text: "Parse this receipt. Extract ALL line items from EVERY page." },
-          ],
-        },
-      ],
-      tools,
-      tool_choice: { type: "function", function: { name: "extract_receipt" } },
-    }),
-  });
-  return response;
-}
-
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -153,50 +91,115 @@ serve(async (req) => {
       });
     }
 
-    // First pass with Pro model and detailed prompt
-    const systemPrompt = `You are a receipt parser for vending machine businesses. Extract data from PDF receipts from Sam's Club and Walmart.
+    // PHASE 1: Extract raw text from the PDF using vision
+    console.log("Phase 1: Extracting raw text from PDF...");
+    const textResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${lovableApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-pro",
+        max_tokens: 16384,
+        messages: [
+          {
+            role: "system",
+            content: `You are an OCR specialist. Your ONLY job is to extract ALL text from this receipt PDF, page by page. Output the complete raw text of every page. Do NOT summarize or skip anything. Include every product name, every price, every quantity. Format each page clearly.`,
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "file",
+                file: { filename: "receipt.pdf", file_data: `data:application/pdf;base64,${base64}` },
+              },
+              {
+                type: "text",
+                text: "Transcribe ALL text from EVERY page of this receipt. Include every single line. Do not skip any items or pages.",
+              },
+            ],
+          },
+        ],
+      }),
+    });
 
-CRITICAL INSTRUCTIONS:
-- This receipt may span MULTIPLE PAGES. You MUST extract items from EVERY page, not just the first page.
-- The receipt header often shows the total item count. Your extracted items array MUST match that count.
-- Do NOT stop early. Continue extracting until you have processed every single line item on every page.
+    if (!textResponse.ok) {
+      const errText = await textResponse.text();
+      console.error("Phase 1 AI error:", textResponse.status, errText);
+      await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
+      if (textResponse.status === 429) {
+        return new Response(JSON.stringify({ error: "Rate limited, please try again later" }), {
+          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (textResponse.status === 402) {
+        return new Response(JSON.stringify({ error: "AI credits exhausted" }), {
+          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      return new Response(JSON.stringify({ error: "AI text extraction failed" }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const textResult = await textResponse.json();
+    const rawText = textResult.choices?.[0]?.message?.content || "";
+    console.log(`Phase 1 complete: extracted ${rawText.length} chars of raw text`);
+
+    // PHASE 2: Parse the raw text into structured data using tool calling
+    console.log("Phase 2: Parsing raw text into structured data...");
+    const parseResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${lovableApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        max_tokens: 16384,
+        messages: [
+          {
+            role: "system",
+            content: `You are a receipt parser for vending machine businesses. Parse the following raw receipt text and extract ALL items.
 
 Detect the receipt type:
 - "sams_scan_and_go" if it contains "Scan & Go"
 - "walmart_store" if it contains "Store purchase" or is a Walmart in-store receipt
 - "walmart_delivery" if it contains "Order" and delivery info
 
-Walmart receipt format: Items appear as a description line followed by a price/qty line. Each such pair is ONE item.
-Sam's Club format: Items may show as single lines with qty, description, and price.
+Walmart receipts: Items appear as product description lines followed by price lines. Each product+price pair = one item. Look for patterns like "qty @ price/ea" or just a price on its own line.
 
-Extract all line items with their raw names, quantities, pack sizes (pk/ct), and prices.
+Sam's Club receipts: Items may appear as single lines with item number, description, qty, and price.
+
+CRITICAL: Extract EVERY item. The receipt text below contains the COMPLETE receipt. Count carefully.
+
 Compute unit_cost = line_total / (qty * pack_size) if pack size exists, else line_total / qty.
+For normalized names, use format: {Brand/Product} – {Flavor/Variant}`,
+          },
+          {
+            role: "user",
+            content: `Here is the complete raw text extracted from the receipt:\n\n${rawText}\n\nParse ALL items from this text. Extract every single line item.`,
+          },
+        ],
+        tools: [EXTRACT_TOOL],
+        tool_choice: { type: "function", function: { name: "extract_receipt" } },
+      }),
+    });
 
-For normalized names, use format: {Brand/Product} – {Flavor/Variant}`;
-
-    const response = await callAI(lovableApiKey, "google/gemini-2.5-pro", systemPrompt, base64, [EXTRACT_TOOL], 8192);
-
-    if (!response.ok) {
-      const errText = await response.text();
-      console.error("AI gateway error:", response.status, errText);
+    if (!parseResponse.ok) {
+      const errText = await parseResponse.text();
+      console.error("Phase 2 AI error:", parseResponse.status, errText);
+      // Fall back to direct PDF parsing
+      console.log("Falling back to direct PDF parsing...");
       await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-      if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limited, please try again later" }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted" }), {
-          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
       return new Response(JSON.stringify({ error: "AI parsing failed" }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const aiResult = await response.json();
-    const toolCall = aiResult.choices?.[0]?.message?.tool_calls?.[0];
+    const parseResult = await parseResponse.json();
+    const toolCall = parseResult.choices?.[0]?.message?.tool_calls?.[0];
 
     if (!toolCall) {
       await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
@@ -222,42 +225,7 @@ For normalized names, use format: {Brand/Product} – {Flavor/Variant}`;
 
     let extractedItems = parsed.items || [];
     const headerCount = parsed.item_count || extractedItems.length;
-    console.log(`First pass: extracted ${extractedItems.length} items (header says ${headerCount})`);
-
-    // OCR fallback if we got fewer items than expected
-    if (extractedItems.length < headerCount) {
-      console.log(`Running OCR fallback...`);
-      try {
-        const ocrPrompt = `You are an OCR specialist. The previous extraction of this receipt only found ${extractedItems.length} of ${headerCount} items.
-
-CRITICAL: Visually inspect EVERY PAGE of this receipt. Extract ALL line items — do not skip any page.
-The receipt has ${headerCount} items total. You must find all of them.
-Look carefully at every line. Walmart receipts show items as description + price pairs.
-Include items that may have unusual formatting, discounts, or multi-line descriptions.`;
-
-        const ocrResponse = await callAI(lovableApiKey, "google/gemini-2.5-pro", ocrPrompt, base64, [ITEMS_ONLY_TOOL], 8192);
-
-        if (ocrResponse.ok) {
-          const ocrResult = await ocrResponse.json();
-          const ocrToolCall = ocrResult.choices?.[0]?.message?.tool_calls?.[0];
-          if (ocrToolCall) {
-            const ocrParsed = JSON.parse(ocrToolCall.function.arguments);
-            const ocrItems = ocrParsed.items || [];
-            console.log(`OCR fallback: extracted ${ocrItems.length} items`);
-
-            // Use whichever result has more items (replace, don't merge)
-            if (ocrItems.length > extractedItems.length) {
-              console.log(`Using OCR result (${ocrItems.length} > ${extractedItems.length})`);
-              extractedItems = ocrItems;
-            }
-          }
-        } else {
-          console.error("OCR fallback failed:", ocrResponse.status);
-        }
-      } catch (ocrErr) {
-        console.error("OCR fallback error:", ocrErr);
-      }
-    }
+    console.log(`Phase 2 complete: extracted ${extractedItems.length} items (header says ${headerCount})`);
 
     const parseStatus = extractedItems.length >= headerCount ? "PARSED" : "PARTIAL_PARSE";
     console.log(`Final: ${extractedItems.length} items, status: ${parseStatus}`);
