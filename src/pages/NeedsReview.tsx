@@ -37,6 +37,8 @@ export default function NeedsReview() {
   const [showCreateSku, setShowCreateSku] = useState(false);
   const [newSkuForm, setNewSkuForm] = useState<NewSkuForm>({ sku_name: "", sell_price: "", category: "" });
   const [creatingSku, setCreatingSku] = useState(false);
+  const [categorySearch, setCategorySearch] = useState("");
+  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
 
   useEffect(() => {
     if (!user) return;
