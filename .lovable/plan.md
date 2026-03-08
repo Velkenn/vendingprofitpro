@@ -1,17 +1,22 @@
 
 
-## Delete all seeded SKUs
+## Auto-populate SKU search with item's raw name
 
-Create a temporary edge function that:
+When a user expands a Needs Review item, the SKU search field should automatically be filled with the item's `raw_name` so it either matches an existing SKU or is ready to become a new one.
 
-1. Finds all seeded SKUs (created before 2026-03-08) for user `fa141e07-5bd4-4bb0-a933-bab7ff5cfc53`
-2. Unlinks any `receipt_items` pointing to those SKUs — sets `sku_id = NULL`, `needs_review = true`
-3. Deletes any `sku_aliases` referencing those SKUs
-4. Deletes the SKUs themselves
-5. After running successfully, delete the edge function
+### Changes
 
-**Files:**
-- Create `supabase/functions/cleanup-seeded-skus/index.ts` — one-time cleanup function using service role key
-- Update `supabase/config.toml` — add function config with `verify_jwt = false`
-- After confirmed working, delete the function and remove config entry
+**`src/pages/NeedsReview.tsx`**
+
+In the `openItem` function, set `skuSearch` to the item's `raw_name` (or `normalized_name` if present) instead of empty string. This will:
+- Immediately filter the SKU dropdown to show relevant matches
+- Pre-fill the "Create SKU" form name if the user clicks "Create"
+- Save the user from having to type the product name manually
+
+Change line in `openItem`:
+```
+setSkuSearch(item.normalized_name || item.raw_name);
+```
+
+Also update the "Create" button handler to use `skuSearch` as the default `sku_name` (already does this via `setNewSkuForm({ sku_name: skuSearch.trim(), ... })`).
 
