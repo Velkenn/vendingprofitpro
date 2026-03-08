@@ -15,7 +15,7 @@ interface TopSku {
 }
 
 export default function Index() {
-  const { user, session } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   const [businessSpend, setBusinessSpend] = useState(0);
