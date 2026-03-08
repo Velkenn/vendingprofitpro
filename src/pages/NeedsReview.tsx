@@ -234,7 +234,8 @@ export default function NeedsReview() {
                               className="w-full px-3 py-1.5 text-left text-sm font-medium text-primary hover:bg-accent flex items-center gap-1"
                               onClick={() => {
                                 setShowCreateSku(true);
-                                setNewSkuForm({ sku_name: skuSearch.trim(), sell_price: "", category: "" });
+                                setNewSkuForm({ sku_name: skuSearch.trim(), sell_price: "", category: mostCommonCategory });
+                                setCategorySearch(mostCommonCategory);
                               }}
                             >
                               <Plus className="h-3.5 w-3.5" />
