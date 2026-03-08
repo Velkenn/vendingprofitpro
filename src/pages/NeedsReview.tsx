@@ -7,9 +7,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, Check, X } from "lucide-react";
+import { AlertTriangle, Check, X, Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
+
+interface NewSkuForm {
+  sku_name: string;
+  sell_price: string;
+  category: string;
+}
 
 export default function NeedsReview() {
   const { user } = useAuth();
@@ -28,6 +34,9 @@ export default function NeedsReview() {
   });
   const [skuSearch, setSkuSearch] = useState("");
   const [saving, setSaving] = useState(false);
+  const [showCreateSku, setShowCreateSku] = useState(false);
+  const [newSkuForm, setNewSkuForm] = useState<NewSkuForm>({ sku_name: "", sell_price: "", category: "" });
+  const [creatingSku, setCreatingSku] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -45,6 +54,25 @@ export default function NeedsReview() {
     });
   }, [user]);
 
+  const autoFillPackSize = async (skuId: string) => {
+    const { data } = await supabase
+      .from("receipt_items")
+      .select("pack_size")
+      .eq("sku_id", skuId)
+      .not("pack_size", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    if (data && data.length > 0 && data[0].pack_size) {
+      setForm((prev) => ({ ...prev, pack_size: data[0].pack_size!.toString() }));
+    }
+  };
+
+  const selectSku = (sku: Tables<"skus">) => {
+    setForm((prev) => ({ ...prev, sku_id: sku.id }));
+    setSkuSearch(sku.sku_name);
+    autoFillPackSize(sku.id);
+  };
+
   const openItem = (item: Tables<"receipt_items">) => {
     if (expandedId === item.id) {
       setExpandedId(null);
@@ -60,6 +88,31 @@ export default function NeedsReview() {
       line_total: Number(item.line_total).toFixed(2),
     });
     setSkuSearch("");
+    setShowCreateSku(false);
+  };
+
+  const handleCreateSku = async () => {
+    if (!user || !newSkuForm.sku_name.trim()) return;
+    setCreatingSku(true);
+    const { data, error } = await supabase
+      .from("skus")
+      .insert({
+        sku_name: newSkuForm.sku_name.trim(),
+        sell_price: newSkuForm.sell_price ? parseFloat(newSkuForm.sell_price) : null,
+        category: newSkuForm.category.trim() || null,
+        user_id: user.id,
+      })
+      .select()
+      .single();
+    setCreatingSku(false);
+    if (error) {
+      toast({ title: "Error creating SKU", description: error.message, variant: "destructive" });
+      return;
+    }
+    setSkus((prev) => [...prev, data].sort((a, b) => a.sku_name.localeCompare(b.sku_name)));
+    selectSku(data);
+    setShowCreateSku(false);
+    toast({ title: "SKU created" });
   };
 
   const handleApprove = async (id: string) => {
@@ -89,6 +142,10 @@ export default function NeedsReview() {
   const filteredSkus = skuSearch
     ? skus.filter((s) => s.sku_name.toLowerCase().includes(skuSearch.toLowerCase()))
     : skus;
+
+  const exactMatch = skuSearch
+    ? skus.some((s) => s.sku_name.toLowerCase() === skuSearch.toLowerCase())
+    : true;
 
   return (
     <div className="px-4 pt-6 pb-24">
@@ -122,10 +179,7 @@ export default function NeedsReview() {
                 </p>
 
                 {expandedId === item.id && (
-                  <div
-                    className="mt-4 space-y-3"
-                    onClick={(e) => e.stopPropagation()}
-                  >
+                  <div className="mt-4 space-y-3" onClick={(e) => e.stopPropagation()}>
                     <div>
                       <Label className="text-xs">Normalized Name</Label>
                       <Input
@@ -140,25 +194,37 @@ export default function NeedsReview() {
                       <Input
                         placeholder="Search SKUs..."
                         value={skuSearch}
-                        onChange={(e) => setSkuSearch(e.target.value)}
+                        onChange={(e) => {
+                          setSkuSearch(e.target.value);
+                          setShowCreateSku(false);
+                        }}
                         className="mt-1 h-9 text-sm"
                       />
-                      {(skuSearch || !form.sku_id) && filteredSkus.length > 0 && (
-                        <div className="mt-1 max-h-32 overflow-y-auto rounded border bg-popover">
+                      {(skuSearch || !form.sku_id) && (
+                        <div className="mt-1 max-h-40 overflow-y-auto rounded border bg-popover">
                           {filteredSkus.slice(0, 20).map((sku) => (
                             <button
                               key={sku.id}
                               className={`w-full px-3 py-1.5 text-left text-sm hover:bg-accent ${
                                 form.sku_id === sku.id ? "bg-accent font-medium" : ""
                               }`}
-                              onClick={() => {
-                                setForm({ ...form, sku_id: sku.id });
-                                setSkuSearch(sku.sku_name);
-                              }}
+                              onClick={() => selectSku(sku)}
                             >
                               {sku.sku_name}
                             </button>
                           ))}
+                          {skuSearch.trim() && !exactMatch && !showCreateSku && (
+                            <button
+                              className="w-full px-3 py-1.5 text-left text-sm font-medium text-primary hover:bg-accent flex items-center gap-1"
+                              onClick={() => {
+                                setShowCreateSku(true);
+                                setNewSkuForm({ sku_name: skuSearch.trim(), sell_price: "", category: "" });
+                              }}
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                              Create "{skuSearch.trim()}"
+                            </button>
+                          )}
                         </div>
                       )}
                       {form.sku_id && !skuSearch && (
@@ -167,6 +233,50 @@ export default function NeedsReview() {
                         </p>
                       )}
                     </div>
+
+                    {showCreateSku && (
+                      <Card className="border shadow-sm">
+                        <CardContent className="p-3 space-y-2">
+                          <p className="text-xs font-medium">New SKU</p>
+                          <div>
+                            <Label className="text-xs">Name</Label>
+                            <Input
+                              value={newSkuForm.sku_name}
+                              onChange={(e) => setNewSkuForm({ ...newSkuForm, sku_name: e.target.value })}
+                              className="mt-1 h-8 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs">Sell Price</Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              placeholder="0.00"
+                              value={newSkuForm.sell_price}
+                              onChange={(e) => setNewSkuForm({ ...newSkuForm, sell_price: e.target.value })}
+                              className="mt-1 h-8 text-sm"
+                            />
+                          </div>
+                          <div>
+                            <Label className="text-xs">Category</Label>
+                            <Input
+                              placeholder="Optional"
+                              value={newSkuForm.category}
+                              onChange={(e) => setNewSkuForm({ ...newSkuForm, category: e.target.value })}
+                              className="mt-1 h-8 text-sm"
+                            />
+                          </div>
+                          <div className="flex gap-2 pt-1">
+                            <Button size="sm" onClick={handleCreateSku} disabled={creatingSku || !newSkuForm.sku_name.trim()} className="flex-1">
+                              {creatingSku ? "Creating..." : "Create & Select"}
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => setShowCreateSku(false)}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
 
                     <div className="grid grid-cols-3 gap-2">
                       <div>
