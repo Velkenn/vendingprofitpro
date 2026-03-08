@@ -1,22 +1,28 @@
 
 
-## Auto-populate SKU search with item's raw name
+## Make Needs Review Items Interactive
 
-When a user expands a Needs Review item, the SKU search field should automatically be filled with the item's `raw_name` so it either matches an existing SKU or is ready to become a new one.
+Currently the Needs Review page is read-only -- items are displayed but cannot be tapped or edited. The purpose of this queue is to let users resolve items that need SKU mapping or corrections.
 
 ### Changes
 
-**`src/pages/NeedsReview.tsx`**
+**`src/pages/NeedsReview.tsx`** -- Full rework to make each item actionable:
 
-In the `openItem` function, set `skuSearch` to the item's `raw_name` (or `normalized_name` if present) instead of empty string. This will:
-- Immediately filter the SKU dropdown to show relevant matches
-- Pre-fill the "Create SKU" form name if the user clicks "Create"
-- Save the user from having to type the product name manually
+1. **Tappable cards** -- Each item card becomes clickable, expanding an inline edit form (or navigating to the parent receipt detail).
 
-Change line in `openItem`:
-```
-setSkuSearch(item.normalized_name || item.raw_name);
-```
+2. **Inline resolution form** per item with:
+   - **Normalized name** -- editable text field (pre-filled with `raw_name`)
+   - **SKU mapping** -- a searchable dropdown of existing SKUs from the `skus` table. Selecting one sets `sku_id` on the item.
+   - **Mark as personal** toggle (`is_personal`)
+   - **Qty / Pack size / Line total** -- editable fields
+   - **"Approve" button** -- saves changes, sets `needs_review = false`, removes item from the list
+   - **"Skip" button** -- collapse without saving
 
-Also update the "Create" button handler to use `skuSearch` as the default `sku_name` (already does this via `setNewSkuForm({ sku_name: skuSearch.trim(), ... })`).
+3. **Fetch SKUs** on mount for the dropdown options (query `skus` table ordered by `sku_name`).
+
+4. **On approve**: Update the `receipt_items` row with edited fields + `needs_review: false`, then remove it from the local list with a toast confirmation.
+
+5. **Count badge** in the header showing total items remaining.
+
+This keeps the workflow minimal-tap: open page, tap item, pick SKU or edit name, hit Approve -- done.
 
