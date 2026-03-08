@@ -87,7 +87,7 @@ export default function NeedsReview() {
       pack_size: item.pack_size?.toString() || "",
       line_total: Number(item.line_total).toFixed(2),
     });
-    setSkuSearch("");
+    setSkuSearch(item.normalized_name || item.raw_name);
     setShowCreateSku(false);
   };
 
