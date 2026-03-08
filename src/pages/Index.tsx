@@ -26,12 +26,6 @@ export default function Index() {
   const [topSkus, setTopSkus] = useState<TopSku[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Seed SKUs on first visit
-  useEffect(() => {
-    if (!session) return;
-    supabase.functions.invoke("seed-skus").catch(console.error);
-  }, [session]);
-
   const loadDashboard = useCallback(async () => {
     if (!user) return;
     setLoading(true);
