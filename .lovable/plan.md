@@ -1,32 +1,28 @@
 
 
-## Improve Receipt Parsing Extraction Rate
+## Make Needs Review Items Interactive
 
-### Problem
-The Walmart receipt has 40 items but only 13 are extracted even after the OCR fallback. The logs show: first pass gets 10, OCR merge gets 13. Both AI calls are missing most items — likely because the receipt is multi-page and the models are truncating output or skipping pages.
-
-### Root Causes
-1. **First pass uses `gemini-2.5-flash`** — a lighter model that struggles with long, dense receipts
-2. **The system prompt lacks explicit multi-page instructions** — no guidance to process every page
-3. **The OCR fallback merges rather than replacing** — if the fallback also misses items, deduplication reduces the gain
-4. **Walmart receipts have a specific format** — items appear as description line + price line pairs, which may confuse extraction
+Currently the Needs Review page is read-only -- items are displayed but cannot be tapped or edited. The purpose of this queue is to let users resolve items that need SKU mapping or corrections.
 
 ### Changes
 
-**`supabase/functions/parse-receipt/index.ts`**
+**`src/pages/NeedsReview.tsx`** -- Full rework to make each item actionable:
 
-1. **Upgrade first-pass model to `google/gemini-2.5-pro`** for complex receipts (when file size > 100KB or always — Pro handles large multi-page docs much better)
+1. **Tappable cards** -- Each item card becomes clickable, expanding an inline edit form (or navigating to the parent receipt detail).
 
-2. **Improve system prompt** with explicit instructions:
-   - "This receipt may span multiple pages. You MUST extract items from EVERY page."
-   - "Walmart receipts list items as: description line, then price line with qty × unit price. Count each such pair as one item."
-   - "The receipt header shows the total item count. Your extracted items array MUST match that count."
+2. **Inline resolution form** per item with:
+   - **Normalized name** -- editable text field (pre-filled with `raw_name`)
+   - **SKU mapping** -- a searchable dropdown of existing SKUs from the `skus` table. Selecting one sets `sku_id` on the item.
+   - **Mark as personal** toggle (`is_personal`)
+   - **Qty / Pack size / Line total** -- editable fields
+   - **"Approve" button** -- saves changes, sets `needs_review = false`, removes item from the list
+   - **"Skip" button** -- collapse without saving
 
-3. **Improve OCR fallback strategy** — instead of merging, use the fallback result as a **complete replacement** if it returns more items than the first pass. This avoids partial-merge issues.
+3. **Fetch SKUs** on mount for the dropdown options (query `skus` table ordered by `sku_name`).
 
-4. **Add `max_tokens` parameter** to the AI calls (e.g., 8192) to ensure the model doesn't truncate its output for large item lists.
+4. **On approve**: Update the `receipt_items` row with edited fields + `needs_review: false`, then remove it from the local list with a toast confirmation.
 
-5. **Log the item count from both passes** for debugging.
+5. **Count badge** in the header showing total items remaining.
 
-### No database changes needed.
+This keeps the workflow minimal-tap: open page, tap item, pick SKU or edit name, hit Approve -- done.
 
