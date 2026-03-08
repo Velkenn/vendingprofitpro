@@ -262,13 +262,35 @@ For normalized names, use format: {Brand/Product} – {Flavor/Variant}`,
       .select("*, skus!inner(user_id)")
       .eq("skus.user_id", receiptData.user_id);
 
+    // Fetch previously reviewed items for secondary matching
+    const { data: reviewedItems } = await supabase
+      .from("receipt_items")
+      .select("raw_name, sku_id, is_personal, pack_size")
+      .eq("user_id", receiptData.user_id)
+      .eq("needs_review", false)
+      .not("sku_id", "is", null)
+      .order("created_at", { ascending: false });
+
+    // Build a map of lowercase raw_name -> most recent reviewed item
+    const reviewedMap = new Map<string, { sku_id: string; is_personal: boolean; pack_size: number | null }>();
+    if (reviewedItems) {
+      for (const ri of reviewedItems) {
+        const key = ri.raw_name.toLowerCase();
+        if (!reviewedMap.has(key)) {
+          reviewedMap.set(key, { sku_id: ri.sku_id!, is_personal: ri.is_personal, pack_size: ri.pack_size });
+        }
+      }
+    }
+
     // Insert receipt items
     if (extractedItems.length > 0) {
       const itemsToInsert = extractedItems.map((item: any) => {
         let matchedSkuId = null;
         let matchedPackSize = item.pack_size || null;
+        let matchedIsPersonal = false;
         let needsReview = true;
 
+        // 1. Check sku_aliases first
         if (aliases) {
           for (const alias of aliases) {
             if (alias.vendor === parsed.vendor) {
@@ -281,6 +303,17 @@ For normalized names, use format: {Brand/Product} – {Flavor/Variant}`,
                 break;
               }
             }
+          }
+        }
+
+        // 2. If no alias match, check previously reviewed items
+        if (needsReview) {
+          const prev = reviewedMap.get(item.raw_name.toLowerCase());
+          if (prev) {
+            matchedSkuId = prev.sku_id;
+            matchedIsPersonal = prev.is_personal;
+            if (prev.pack_size) matchedPackSize = prev.pack_size;
+            needsReview = false;
           }
         }
 
