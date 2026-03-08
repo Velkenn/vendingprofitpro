@@ -37,6 +37,8 @@ export default function NeedsReview() {
   const [showCreateSku, setShowCreateSku] = useState(false);
   const [newSkuForm, setNewSkuForm] = useState<NewSkuForm>({ sku_name: "", sell_price: "", category: "" });
   const [creatingSku, setCreatingSku] = useState(false);
+  const [categorySearch, setCategorySearch] = useState("");
+  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -147,6 +149,20 @@ export default function NeedsReview() {
     ? skus.some((s) => s.sku_name.toLowerCase() === skuSearch.toLowerCase())
     : true;
 
+  // Extract unique categories and find most common
+  const categories = [...new Set(skus.map(s => s.category).filter(Boolean))] as string[];
+  const categoryCountMap = skus.reduce((acc, s) => {
+    if (s.category) acc[s.category] = (acc[s.category] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+  const mostCommonCategory = categories.length > 0
+    ? categories.reduce((a, b) => (categoryCountMap[a] || 0) >= (categoryCountMap[b] || 0) ? a : b)
+    : "";
+
+  const filteredCategories = categorySearch
+    ? categories.filter(c => c.toLowerCase().includes(categorySearch.toLowerCase()))
+    : categories;
+
   return (
     <div className="px-4 pt-6 pb-24">
       <div className="mb-4 flex items-center gap-2">
@@ -218,7 +234,8 @@ export default function NeedsReview() {
                               className="w-full px-3 py-1.5 text-left text-sm font-medium text-primary hover:bg-accent flex items-center gap-1"
                               onClick={() => {
                                 setShowCreateSku(true);
-                                setNewSkuForm({ sku_name: skuSearch.trim(), sell_price: "", category: "" });
+                                setNewSkuForm({ sku_name: skuSearch.trim(), sell_price: "", category: mostCommonCategory });
+                                setCategorySearch(mostCommonCategory);
                               }}
                             >
                               <Plus className="h-3.5 w-3.5" />
@@ -260,11 +277,35 @@ export default function NeedsReview() {
                           <div>
                             <Label className="text-xs">Category</Label>
                             <Input
-                              placeholder="Optional"
-                              value={newSkuForm.category}
-                              onChange={(e) => setNewSkuForm({ ...newSkuForm, category: e.target.value })}
+                              placeholder="Search or type category..."
+                              value={categorySearch}
+                              onChange={(e) => {
+                                setCategorySearch(e.target.value);
+                                setNewSkuForm({ ...newSkuForm, category: e.target.value });
+                                setShowCategoryDropdown(true);
+                              }}
+                              onFocus={() => setShowCategoryDropdown(true)}
                               className="mt-1 h-8 text-sm"
                             />
+                            {showCategoryDropdown && filteredCategories.length > 0 && (
+                              <div className="mt-1 max-h-32 overflow-y-auto rounded border bg-popover">
+                                {filteredCategories.slice(0, 10).map((cat) => (
+                                  <button
+                                    key={cat}
+                                    className={`w-full px-3 py-1.5 text-left text-sm hover:bg-accent ${
+                                      newSkuForm.category === cat ? "bg-accent font-medium" : ""
+                                    }`}
+                                    onClick={() => {
+                                      setNewSkuForm({ ...newSkuForm, category: cat });
+                                      setCategorySearch(cat);
+                                      setShowCategoryDropdown(false);
+                                    }}
+                                  >
+                                    {cat}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
                           </div>
                           <div className="flex gap-2 pt-1">
                             <Button size="sm" onClick={handleCreateSku} disabled={creatingSku || !newSkuForm.sku_name.trim()} className="flex-1">
