@@ -328,7 +328,7 @@ For normalized names, use format: {Brand/Product} – {Flavor/Variant}`,
           pack_size_uom: item.pack_size_uom || null,
           unit_cost: item.unit_cost || null,
           line_total: item.line_total,
-          is_personal: false,
+          is_personal: matchedIsPersonal,
           needs_review: needsReview,
         };
       });
