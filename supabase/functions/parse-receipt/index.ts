@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getDocument } from "https://esm.sh/pdfjs-serverless@0.3.2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -50,6 +51,18 @@ const EXTRACT_TOOL = {
   },
 };
 
+async function extractPdfText(pdfBytes: Uint8Array): Promise<string> {
+  const doc = await getDocument(pdfBytes).promise;
+  const pages: string[] = [];
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const textContent = await page.getTextContent();
+    const pageText = textContent.items.map((item: any) => item.str).join(" ");
+    pages.push(`--- Page ${i} ---\n${pageText}`);
+  }
+  return pages.join("\n\n");
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -74,15 +87,8 @@ serve(async (req) => {
       });
     }
 
-    // Convert PDF to base64
     const arrayBuffer = await fileData.arrayBuffer();
     const bytes = new Uint8Array(arrayBuffer);
-    let binary = "";
-    const chunkSize = 8192;
-    for (let i = 0; i < bytes.length; i += chunkSize) {
-      binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-    }
-    const base64 = btoa(binary);
 
     if (!lovableApiKey) {
       await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
@@ -91,9 +97,59 @@ serve(async (req) => {
       });
     }
 
-    // PHASE 1: Extract raw text from the PDF using vision
-    console.log("Phase 1: Extracting raw text from PDF...");
-    const textResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    // PHASE 1: Extract raw text from PDF using pdfjs (all pages)
+    console.log("Phase 1: Extracting text from PDF with pdfjs...");
+    let rawText: string;
+    try {
+      rawText = await extractPdfText(bytes);
+      console.log(`Phase 1 complete: extracted ${rawText.length} chars across all pages`);
+    } catch (pdfErr) {
+      console.error("PDF text extraction failed, falling back to AI vision:", pdfErr);
+      // Fallback: use AI vision for text extraction
+      let binary = "";
+      const chunkSize = 8192;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+      }
+      const base64 = btoa(binary);
+
+      const textResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${lovableApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-pro",
+          max_tokens: 16384,
+          messages: [
+            { role: "system", content: "You are an OCR specialist. Transcribe ALL text from EVERY page of this PDF. Do not skip anything." },
+            {
+              role: "user",
+              content: [
+                { type: "file", file: { filename: "receipt.pdf", file_data: `data:application/pdf;base64,${base64}` } },
+                { type: "text", text: "Transcribe ALL text from EVERY page." },
+              ],
+            },
+          ],
+        }),
+      });
+
+      if (!textResponse.ok) {
+        await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
+        return new Response(JSON.stringify({ error: "Text extraction failed" }), {
+          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const textResult = await textResponse.json();
+      rawText = textResult.choices?.[0]?.message?.content || "";
+      console.log(`AI fallback: extracted ${rawText.length} chars`);
+    }
+
+    // PHASE 2: Parse the raw text into structured data
+    console.log("Phase 2: Parsing text into structured data...");
+    const parseResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${lovableApiKey}`,
@@ -105,81 +161,25 @@ serve(async (req) => {
         messages: [
           {
             role: "system",
-            content: `You are an OCR specialist. Your ONLY job is to extract ALL text from this receipt PDF, page by page. Output the complete raw text of every page. Do NOT summarize or skip anything. Include every product name, every price, every quantity. Format each page clearly.`,
-          },
-          {
-            role: "user",
-            content: [
-              {
-                type: "file",
-                file: { filename: "receipt.pdf", file_data: `data:application/pdf;base64,${base64}` },
-              },
-              {
-                type: "text",
-                text: "Transcribe ALL text from EVERY page of this receipt. Include every single line. Do not skip any items or pages.",
-              },
-            ],
-          },
-        ],
-      }),
-    });
-
-    if (!textResponse.ok) {
-      const errText = await textResponse.text();
-      console.error("Phase 1 AI error:", textResponse.status, errText);
-      await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-      if (textResponse.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limited, please try again later" }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (textResponse.status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted" }), {
-          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ error: "AI text extraction failed" }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const textResult = await textResponse.json();
-    const rawText = textResult.choices?.[0]?.message?.content || "";
-    console.log(`Phase 1 complete: extracted ${rawText.length} chars of raw text`);
-
-    // PHASE 2: Parse the raw text into structured data using tool calling
-    console.log("Phase 2: Parsing raw text into structured data...");
-    const parseResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${lovableApiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        max_tokens: 16384,
-        messages: [
-          {
-            role: "system",
-            content: `You are a receipt parser for vending machine businesses. Parse the following raw receipt text and extract ALL items.
+            content: `You are a receipt parser for vending machine businesses. Parse the raw receipt text and extract ALL items.
 
 Detect the receipt type:
 - "sams_scan_and_go" if it contains "Scan & Go"
-- "walmart_store" if it contains "Store purchase" or is a Walmart in-store receipt
+- "walmart_store" if it's a Walmart in-store receipt
 - "walmart_delivery" if it contains "Order" and delivery info
 
-Walmart receipts: Items appear as product description lines followed by price lines. Each product+price pair = one item. Look for patterns like "qty @ price/ea" or just a price on its own line.
+Walmart receipts: Items appear as product descriptions followed by prices. Look for patterns like "qty @ price/ea" or standalone prices after descriptions. Each product+price = one item.
 
 Sam's Club receipts: Items may appear as single lines with item number, description, qty, and price.
 
-CRITICAL: Extract EVERY item. The receipt text below contains the COMPLETE receipt. Count carefully.
+CRITICAL: You MUST extract EVERY item from the text. The text below contains ALL pages of the receipt. Count carefully and do not miss any items.
 
 Compute unit_cost = line_total / (qty * pack_size) if pack size exists, else line_total / qty.
 For normalized names, use format: {Brand/Product} – {Flavor/Variant}`,
           },
           {
             role: "user",
-            content: `Here is the complete raw text extracted from the receipt:\n\n${rawText}\n\nParse ALL items from this text. Extract every single line item.`,
+            content: `Here is the complete raw text extracted from ALL pages of the receipt:\n\n${rawText}\n\nParse ALL items from this text. Extract every single line item.`,
           },
         ],
         tools: [EXTRACT_TOOL],
@@ -190,9 +190,17 @@ For normalized names, use format: {Brand/Product} – {Flavor/Variant}`,
     if (!parseResponse.ok) {
       const errText = await parseResponse.text();
       console.error("Phase 2 AI error:", parseResponse.status, errText);
-      // Fall back to direct PDF parsing
-      console.log("Falling back to direct PDF parsing...");
       await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
+      if (parseResponse.status === 429) {
+        return new Response(JSON.stringify({ error: "Rate limited, please try again later" }), {
+          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      if (parseResponse.status === 402) {
+        return new Response(JSON.stringify({ error: "AI credits exhausted" }), {
+          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
       return new Response(JSON.stringify({ error: "AI parsing failed" }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
