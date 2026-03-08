@@ -233,10 +233,14 @@ For normalized names, use format: {Brand/Product} – {Flavor/Variant}`,
 
     let extractedItems = parsed.items || [];
     const headerCount = parsed.item_count || extractedItems.length;
-    console.log(`Phase 2 complete: extracted ${extractedItems.length} items (header says ${headerCount})`);
+    // header item_count often means total quantity, not unique line items
+    // Compare total qty sum against header count to determine parse status
+    const totalQty = extractedItems.reduce((sum: number, item: any) => sum + (item.qty || 1), 0);
+    console.log(`Phase 2 complete: ${extractedItems.length} line items, total qty ${totalQty} (header says ${headerCount})`);
 
-    const parseStatus = extractedItems.length >= headerCount ? "PARSED" : "PARTIAL_PARSE";
-    console.log(`Final: ${extractedItems.length} items, status: ${parseStatus}`);
+    // Consider parsed if either line count or total qty matches header count
+    const parseStatus = (extractedItems.length >= headerCount || totalQty >= headerCount) ? "PARSED" : "PARTIAL_PARSE";
+    console.log(`Final: ${extractedItems.length} lines, qty sum ${totalQty}, status: ${parseStatus}`);
 
     // Update receipt header
     await supabase.from("receipts").update({
