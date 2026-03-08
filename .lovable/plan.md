@@ -1,26 +1,28 @@
 
 
-## Add Edit & Delete to SKUs page
+## Make Needs Review Items Interactive
 
-The user wants to manage SKUs from the SKU Master page, including the ability to edit and delete. I'll also need to understand which specific SKUs the user wants deleted (they can do this via the new UI).
+Currently the Needs Review page is read-only -- items are displayed but cannot be tapped or edited. The purpose of this queue is to let users resolve items that need SKU mapping or corrections.
 
 ### Changes
 
-**`src/pages/SKUs.tsx`**
+**`src/pages/NeedsReview.tsx`** -- Full rework to make each item actionable:
 
-1. Add edit/delete buttons to each SKU card (using Edit2 and Trash2 icons)
-2. Add edit mode that expands inline (similar to NeedsReview pattern) with fields for:
-   - SKU Name
-   - Sell Price
-   - Category (with autocomplete from existing categories)
-   - Rebuy Status (dropdown: Rebuy, Test, Do Not Rebuy)
-   - Default Is Personal (switch)
-3. Add delete confirmation dialog (AlertDialog) to prevent accidental deletions
-4. On delete: cascade-handle by setting linked receipt_items to `sku_id = null` and `needs_review = true`
-5. Refresh state after edits/deletes
+1. **Tappable cards** -- Each item card becomes clickable, expanding an inline edit form (or navigating to the parent receipt detail).
 
-### Flow
-- Each SKU card gets Edit and Delete icon buttons on the right
-- Edit button expands the card inline with form fields
-- Delete shows AlertDialog confirmation, then removes the SKU and unlinks any receipt_items
+2. **Inline resolution form** per item with:
+   - **Normalized name** -- editable text field (pre-filled with `raw_name`)
+   - **SKU mapping** -- a searchable dropdown of existing SKUs from the `skus` table. Selecting one sets `sku_id` on the item.
+   - **Mark as personal** toggle (`is_personal`)
+   - **Qty / Pack size / Line total** -- editable fields
+   - **"Approve" button** -- saves changes, sets `needs_review = false`, removes item from the list
+   - **"Skip" button** -- collapse without saving
+
+3. **Fetch SKUs** on mount for the dropdown options (query `skus` table ordered by `sku_name`).
+
+4. **On approve**: Update the `receipt_items` row with edited fields + `needs_review: false`, then remove it from the local list with a toast confirmation.
+
+5. **Count badge** in the header showing total items remaining.
+
+This keeps the workflow minimal-tap: open page, tap item, pick SKU or edit name, hit Approve -- done.
 
