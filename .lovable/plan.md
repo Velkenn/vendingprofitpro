@@ -1,46 +1,28 @@
 
 
-## Friendlier Receipt Status Presentation
+## Make Needs Review Items Interactive
 
-Right now the UI shows raw enum values like `PARSED`, `PARTIAL_PARSE`, `PENDING`, and `FAILED` — these are developer-facing labels that don't mean much to users. The upload flow also navigates to the detail page immediately while parsing is still running, showing an empty state with no feedback.
+Currently the Needs Review page is read-only -- items are displayed but cannot be tapped or edited. The purpose of this queue is to let users resolve items that need SKU mapping or corrections.
 
 ### Changes
 
-**1. Human-readable status labels + icons** (across all pages that show status)
+**`src/pages/NeedsReview.tsx`** -- Full rework to make each item actionable:
 
-| Internal status | Display label | Icon | Color |
-|---|---|---|---|
-| `PENDING` | "Processing..." | spinning loader | muted/blue |
-| `PARSED` | "Complete" | check-circle | green |
-| `PARTIAL_PARSE` | "Needs attention" | alert-triangle | amber/orange |
-| `FAILED` | "Failed" | x-circle | red |
+1. **Tappable cards** -- Each item card becomes clickable, expanding an inline edit form (or navigating to the parent receipt detail).
 
-Create a small helper `src/lib/receipt-status.ts` that maps status → `{ label, icon, colorClass }` so it's consistent everywhere.
+2. **Inline resolution form** per item with:
+   - **Normalized name** -- editable text field (pre-filled with `raw_name`)
+   - **SKU mapping** -- a searchable dropdown of existing SKUs from the `skus` table. Selecting one sets `sku_id` on the item.
+   - **Mark as personal** toggle (`is_personal`)
+   - **Qty / Pack size / Line total** -- editable fields
+   - **"Approve" button** -- saves changes, sets `needs_review = false`, removes item from the list
+   - **"Skip" button** -- collapse without saving
 
-**2. Upload page — progress feedback** (`src/pages/Upload.tsx`)
+3. **Fetch SKUs** on mount for the dropdown options (query `skus` table ordered by `sku_name`).
 
-After triggering the parse, instead of immediately navigating away, show an inline progress state:
-- Animated spinner with "Analyzing your receipt..."
-- On completion (poll the receipt row every 2s or use realtime), show a success summary: "Found 10 items · $127.43 total" with a "View Receipt" button
-- On failure, show the error inline with a "Try Again" option
+4. **On approve**: Update the `receipt_items` row with edited fields + `needs_review: false`, then remove it from the local list with a toast confirmation.
 
-**3. Receipt detail — friendlier partial-parse banner** (`src/pages/ReceiptDetail.tsx`)
+5. **Count badge** in the header showing total items remaining.
 
-Replace the current misleading "X of Y items extracted" (which confuses line items vs quantities) with:
-- "All items extracted" (green) when `PARSED`
-- "Review recommended — some items may need corrections" (amber) when `PARTIAL_PARSE`, with a link to the Needs Review queue
-- Remove the item_count comparison entirely since it's unreliable
-
-**4. Receipts list — cleaner badges** (`src/pages/Receipts.tsx`)
-
-- Replace raw enum badges with the human-readable labels from the helper
-- For `PENDING`, show a small animated dot or spinner instead of a static badge
-- Add item count subtitle: e.g. "10 items" under the date
-
-### Files to create/edit
-
-- **Create** `src/lib/receipt-status.ts` — status mapping helper
-- **Edit** `src/pages/Upload.tsx` — post-upload polling + inline progress
-- **Edit** `src/pages/Receipts.tsx` — friendly labels, item count, pending animation
-- **Edit** `src/pages/ReceiptDetail.tsx` — replace misleading banner, use friendly status
+This keeps the workflow minimal-tap: open page, tap item, pick SKU or edit name, hit Approve -- done.
 
