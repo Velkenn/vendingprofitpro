@@ -149,6 +149,20 @@ export default function NeedsReview() {
     ? skus.some((s) => s.sku_name.toLowerCase() === skuSearch.toLowerCase())
     : true;
 
+  // Extract unique categories and find most common
+  const categories = [...new Set(skus.map(s => s.category).filter(Boolean))] as string[];
+  const categoryCountMap = skus.reduce((acc, s) => {
+    if (s.category) acc[s.category] = (acc[s.category] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+  const mostCommonCategory = categories.length > 0
+    ? categories.reduce((a, b) => (categoryCountMap[a] || 0) >= (categoryCountMap[b] || 0) ? a : b)
+    : "";
+
+  const filteredCategories = categorySearch
+    ? categories.filter(c => c.toLowerCase().includes(categorySearch.toLowerCase()))
+    : categories;
+
   return (
     <div className="px-4 pt-6 pb-24">
       <div className="mb-4 flex items-center gap-2">
