@@ -1,28 +1,28 @@
 
 
-## Remove seed SKUs, let users create all SKUs through Needs Review
+## Make Needs Review Items Interactive
 
-The `seed-skus` edge function pre-populates ~30 SKUs on first login. This causes confusion because the AI parser tries to match receipt items against these pre-made SKUs (which don't align with actual receipt text). The intended flow is: upload receipt → all items land in Needs Review → user creates SKUs inline and maps them → future receipts auto-match.
+Currently the Needs Review page is read-only -- items are displayed but cannot be tapped or edited. The purpose of this queue is to let users resolve items that need SKU mapping or corrections.
 
 ### Changes
 
-**1. `src/pages/Index.tsx`** — Remove the seed-skus call
-- Delete lines 29-33 (the `useEffect` that invokes `seed-skus`)
-- Keep the `user_settings` upsert logic (move it inline or to AuthContext if needed)
+**`src/pages/NeedsReview.tsx`** -- Full rework to make each item actionable:
 
-**2. `supabase/functions/seed-skus/index.ts`** — Delete this edge function entirely
-- It's no longer needed since users create SKUs through the Needs Review flow
+1. **Tappable cards** -- Each item card becomes clickable, expanding an inline edit form (or navigating to the parent receipt detail).
 
-**3. Ensure `user_settings` is still created for new users**
-- The seed-skus function also creates `user_settings`. Move that upsert into `Index.tsx` dashboard load (or a lightweight effect) so new users still get default settings.
+2. **Inline resolution form** per item with:
+   - **Normalized name** -- editable text field (pre-filled with `raw_name`)
+   - **SKU mapping** -- a searchable dropdown of existing SKUs from the `skus` table. Selecting one sets `sku_id` on the item.
+   - **Mark as personal** toggle (`is_personal`)
+   - **Qty / Pack size / Line total** -- editable fields
+   - **"Approve" button** -- saves changes, sets `needs_review = false`, removes item from the list
+   - **"Skip" button** -- collapse without saving
 
-**4. `supabase/functions/parse-receipt/index.ts`** — No changes needed
-- The existing logic already handles the case where no SKUs/aliases exist: items simply get `needs_review = true`
-- Historical matching from previously reviewed items continues to work
+3. **Fetch SKUs** on mount for the dropdown options (query `skus` table ordered by `sku_name`).
 
-### Result
-- New users start with zero SKUs
-- First receipt upload → all items go to Needs Review
-- User creates SKUs inline with sell price, maps items, approves
-- Second receipt upload → previously reviewed items auto-match and skip review
+4. **On approve**: Update the `receipt_items` row with edited fields + `needs_review: false`, then remove it from the local list with a toast confirmation.
+
+5. **Count badge** in the header showing total items remaining.
+
+This keeps the workflow minimal-tap: open page, tap item, pick SKU or edit name, hit Approve -- done.
 

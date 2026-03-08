@@ -15,7 +15,7 @@ interface TopSku {
 }
 
 export default function Index() {
-  const { user, session } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   const [businessSpend, setBusinessSpend] = useState(0);
@@ -26,15 +26,15 @@ export default function Index() {
   const [topSkus, setTopSkus] = useState<TopSku[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Seed SKUs on first visit
-  useEffect(() => {
-    if (!session) return;
-    supabase.functions.invoke("seed-skus").catch(console.error);
-  }, [session]);
-
   const loadDashboard = useCallback(async () => {
     if (!user) return;
     setLoading(true);
+
+    // Ensure user_settings exist
+    await supabase.from("user_settings").upsert({
+      user_id: user.id,
+      week_start_day: 0,
+    }, { onConflict: "user_id", ignoreDuplicates: true });
 
     // Get user's week_start_day
     const { data: settings } = await supabase
