@@ -277,11 +277,35 @@ export default function NeedsReview() {
                           <div>
                             <Label className="text-xs">Category</Label>
                             <Input
-                              placeholder="Optional"
-                              value={newSkuForm.category}
-                              onChange={(e) => setNewSkuForm({ ...newSkuForm, category: e.target.value })}
+                              placeholder="Search or type category..."
+                              value={categorySearch}
+                              onChange={(e) => {
+                                setCategorySearch(e.target.value);
+                                setNewSkuForm({ ...newSkuForm, category: e.target.value });
+                                setShowCategoryDropdown(true);
+                              }}
+                              onFocus={() => setShowCategoryDropdown(true)}
                               className="mt-1 h-8 text-sm"
                             />
+                            {showCategoryDropdown && filteredCategories.length > 0 && (
+                              <div className="mt-1 max-h-32 overflow-y-auto rounded border bg-popover">
+                                {filteredCategories.slice(0, 10).map((cat) => (
+                                  <button
+                                    key={cat}
+                                    className={`w-full px-3 py-1.5 text-left text-sm hover:bg-accent ${
+                                      newSkuForm.category === cat ? "bg-accent font-medium" : ""
+                                    }`}
+                                    onClick={() => {
+                                      setNewSkuForm({ ...newSkuForm, category: cat });
+                                      setCategorySearch(cat);
+                                      setShowCategoryDropdown(false);
+                                    }}
+                                  >
+                                    {cat}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
                           </div>
                           <div className="flex gap-2 pt-1">
                             <Button size="sm" onClick={handleCreateSku} disabled={creatingSku || !newSkuForm.sku_name.trim()} className="flex-1">
