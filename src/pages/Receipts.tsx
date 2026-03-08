@@ -8,6 +8,7 @@ import { Receipt, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { Tables } from "@/integrations/supabase/types";
 import { format } from "date-fns";
+import { getReceiptStatus } from "@/lib/receipt-status";
 
 export default function Receipts() {
   const { user } = useAuth();
@@ -26,13 +27,6 @@ export default function Receipts() {
         setLoading(false);
       });
   }, [user]);
-
-  const statusColor = (s: string) => {
-    if (s === "PARSED") return "bg-primary/10 text-primary";
-    if (s === "PARTIAL_PARSE") return "bg-accent/10 text-accent";
-    if (s === "FAILED") return "bg-destructive/10 text-destructive";
-    return "bg-muted text-muted-foreground";
-  };
 
   return (
     <div className="px-4 pt-6">
@@ -54,22 +48,30 @@ export default function Receipts() {
         </Card>
       ) : (
         <div className="space-y-2">
-          {receipts.map((r) => (
-            <Card key={r.id} className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate(`/receipts/${r.id}`)}>
-              <CardContent className="flex items-center gap-3 p-4">
-                <div className="flex-1">
-                  <p className="font-medium capitalize">{r.vendor === "sams" ? "Sam's Club" : "Walmart"}</p>
-                  <p className="text-xs text-muted-foreground">{format(new Date(r.receipt_date), "MMM d, yyyy")}</p>
-                </div>
-                <div className="text-right">
-                  <p className="font-bold">${Number(r.total || 0).toFixed(2)}</p>
-                  <Badge variant="secondary" className={`text-xs ${statusColor(r.parse_status)}`}>
-                    {r.parse_status}
-                  </Badge>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+          {receipts.map((r) => {
+            const status = getReceiptStatus(r.parse_status);
+            const StatusIcon = status.icon;
+            return (
+              <Card key={r.id} className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate(`/receipts/${r.id}`)}>
+                <CardContent className="flex items-center gap-3 p-4">
+                  <div className="flex-1">
+                    <p className="font-medium capitalize">{r.vendor === "sams" ? "Sam's Club" : "Walmart"}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {format(new Date(r.receipt_date), "MMM d, yyyy")}
+                      {r.item_count ? ` · ${r.item_count} items` : ""}
+                    </p>
+                  </div>
+                  <div className="text-right flex flex-col items-end gap-1">
+                    <p className="font-bold">${Number(r.total || 0).toFixed(2)}</p>
+                    <Badge variant="secondary" className={`text-xs gap-1 ${status.badgeClass}`}>
+                      <StatusIcon className={`h-3 w-3 ${status.animate ? "animate-spin" : ""}`} />
+                      {status.label}
+                    </Badge>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
     </div>
