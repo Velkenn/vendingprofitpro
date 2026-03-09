@@ -84,7 +84,9 @@ export default function SKUs() {
 
   const rebuyColor = (s: string) => {
     if (s === "Rebuy") return "bg-primary/10 text-primary";
+    if (s === "Core") return "bg-chart-2/10 text-chart-2";
     if (s === "Do Not Rebuy") return "bg-destructive/10 text-destructive";
+    if (s === "Failed") return "bg-destructive/10 text-destructive";
     return "bg-accent/10 text-accent";
   };
 
