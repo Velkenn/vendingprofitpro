@@ -1,30 +1,29 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import {
-  LogOut, AlertTriangle, Tag, ShoppingCart, TrendingUp, Trophy, FileDown,
-  ChevronRight
-} from "lucide-react";
+import { LogOut, FileDown } from "lucide-react";
 
 const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
-const menuItems = [
-  { path: "/needs-review", label: "Needs Review", icon: AlertTriangle },
-  { path: "/needs-price", label: "Needs Price", icon: Tag },
-  { path: "/purchases", label: "Purchases", icon: ShoppingCart },
-  { path: "/cost-trends", label: "Cost Trends", icon: TrendingUp },
-  { path: "/profit-leaderboard", label: "Profit Leaderboard", icon: Trophy },
-  { path: "/export", label: "Export Reports", icon: FileDown },
-];
+function downloadCsv(filename: string, rows: Record<string, unknown>[]) {
+  if (rows.length === 0) return;
+  const headers = Object.keys(rows[0]);
+  const csv = [headers.join(","), ...rows.map((r) => headers.map((h) => `"${r[h] ?? ""}"`).join(","))].join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
 export default function SettingsPage() {
   const { user, signOut } = useAuth();
-  const navigate = useNavigate();
   const { toast } = useToast();
   const [weekStart, setWeekStart] = useState("0");
 
@@ -49,23 +48,26 @@ export default function SettingsPage() {
     if (error) toast({ title: "Error", description: error.message, variant: "destructive" });
   };
 
+  const exportTable = async (table: "receipts" | "receipt_items" | "skus") => {
+    if (!user) return;
+    const { data, error } = await supabase.from(table).select("*");
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+      return;
+    }
+    if (!data || data.length === 0) {
+      toast({ title: "No data", description: `No ${table} data to export.` });
+      return;
+    }
+    downloadCsv(`emvending_${table}.csv`, data as Record<string, unknown>[]);
+    toast({ title: "Exported", description: `${data.length} ${table} rows exported.` });
+  };
+
   return (
     <div className="px-4 pt-6">
       <h1 className="mb-4 text-2xl font-bold tracking-tight">Settings</h1>
 
-      <div className="space-y-2 mb-6">
-        {menuItems.map(({ path, label, icon: Icon }) => (
-          <Card key={path} className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate(path)}>
-            <CardContent className="flex items-center gap-3 p-4">
-              <Icon className="h-5 w-5 text-muted-foreground" />
-              <span className="flex-1 font-medium text-sm">{label}</span>
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      <Card className="border-0 shadow-sm mb-6">
+      <Card className="border-0 shadow-sm mb-4">
         <CardContent className="p-4 space-y-3">
           <p className="font-medium text-sm">Week Start Day</p>
           <Select value={weekStart} onValueChange={saveWeekStart}>
@@ -78,6 +80,22 @@ export default function SettingsPage() {
               ))}
             </SelectContent>
           </Select>
+        </CardContent>
+      </Card>
+
+      <Card className="border-0 shadow-sm mb-6">
+        <CardContent className="p-4 space-y-3">
+          <p className="font-medium text-sm">Export Data</p>
+          <div className="space-y-2">
+            {(["receipts", "receipt_items", "skus"] as const).map((t) => (
+              <div key={t} className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground capitalize">{t.replace("_", " ")}</span>
+                <Button size="sm" variant="outline" className="gap-1" onClick={() => exportTable(t)}>
+                  <FileDown className="h-4 w-4" /> CSV
+                </Button>
+              </div>
+            ))}
+          </div>
         </CardContent>
       </Card>
 
