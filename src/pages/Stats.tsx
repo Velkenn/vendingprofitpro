@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { BarChart3, Package, DollarSign, TrendingUp } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
 import { startOfWeek, startOfMonth, startOfYear, isAfter } from "date-fns";
