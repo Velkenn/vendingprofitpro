@@ -1,11 +1,11 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Receipt, Package, Upload, Settings } from "lucide-react";
+import { LayoutDashboard, Receipt, Package, BarChart3, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { path: "/", icon: LayoutDashboard, label: "Home" },
   { path: "/receipts", icon: Receipt, label: "Receipts" },
-  { path: "/upload", icon: Upload, label: "Upload" },
+  { path: "/stats", icon: BarChart3, label: "Stats" },
   { path: "/skus", icon: Package, label: "SKUs" },
   { path: "/settings", icon: Settings, label: "More" },
 ];
