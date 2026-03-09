@@ -29,17 +29,106 @@ export default function Receipts() {
   const [errorMsg, setErrorMsg] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => stopPolling(), [stopPolling]);
+
+  const loadReceipts = useCallback(async () => {
     if (!user) return;
-    supabase
+    const { data } = await supabase
       .from("receipts")
       .select("*")
-      .order("receipt_date", { ascending: false })
-      .then(({ data }) => {
-        setReceipts(data || []);
-        setLoading(false);
-      });
+      .order("receipt_date", { ascending: false });
+    setReceipts(data || []);
   }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    loadReceipts().then(() => setLoading(false));
+  }, [user, loadReceipts]);
+
+  const pollReceipt = useCallback((receiptId: string) => {
+    pollRef.current = setInterval(async () => {
+      const { data } = await supabase
+        .from("receipts")
+        .select("*")
+        .eq("id", receiptId)
+        .single();
+      if (data && data.parse_status !== "PENDING") {
+        stopPolling();
+        setUploadReceipt(data);
+        if (data.parse_status === "FAILED") {
+          setUploadState("error");
+          setErrorMsg("Could not read this receipt. Try a clearer scan.");
+        } else {
+          setUploadState("done");
+          loadReceipts(); // Refresh the receipts list
+        }
+      }
+    }, 2000);
+  }, [stopPolling, loadReceipts]);
+
+  const handleUploadClick = () => {
+    if (!uploadExpanded) {
+      setUploadExpanded(true);
+    } else {
+      fileRef.current?.click();
+    }
+  };
+
+  const handleUpload = async () => {
+    if (!file || !user) return;
+    setUploadState("uploading");
+    setErrorMsg("");
+
+    try {
+      const filePath = `${user.id}/${Date.now()}_${file.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from("receipts")
+        .upload(filePath, file);
+      if (uploadError) throw uploadError;
+
+      const { data: newReceipt, error: dbError } = await supabase
+        .from("receipts")
+        .insert({
+          user_id: user.id,
+          vendor: "sams" as const,
+          receipt_date: new Date().toISOString().split("T")[0],
+          parse_status: "PENDING" as const,
+          pdf_url: filePath,
+        })
+        .select()
+        .single();
+      if (dbError) throw dbError;
+
+      setUploadReceipt(newReceipt);
+      setUploadState("parsing");
+
+      // Fire and forget — we poll for completion
+      supabase.functions.invoke("parse-receipt", {
+        body: { receipt_id: newReceipt.id, file_path: filePath },
+      });
+
+      pollReceipt(newReceipt.id);
+    } catch (err: any) {
+      setUploadState("error");
+      setErrorMsg(err.message);
+    }
+  };
+
+  const handleUploadReset = () => {
+    stopPolling();
+    setFile(null);
+    setUploadReceipt(null);
+    setUploadState("idle");
+    setErrorMsg("");
+    setUploadExpanded(false);
+  };
 
   return (
     <div className="px-4 pt-6">
