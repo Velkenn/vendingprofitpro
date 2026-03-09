@@ -261,11 +261,19 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      evaluate_test_skus: {
+        Args: { p_user_id: string }
+        Returns: {
+          new_status: string
+          old_status: string
+          sku_id: string
+          sku_name: string
+        }[]
+      }
     }
     Enums: {
       parse_status_type: "PENDING" | "PARSED" | "PARTIAL_PARSE" | "FAILED"
-      rebuy_status_type: "Rebuy" | "Test" | "Do Not Rebuy"
+      rebuy_status_type: "Rebuy" | "Test" | "Do Not Rebuy" | "Core" | "Failed"
       receipt_type: "sams_scan_and_go" | "walmart_store" | "walmart_delivery"
       vendor_type: "sams" | "walmart"
     }
@@ -396,7 +404,7 @@ export const Constants = {
   public: {
     Enums: {
       parse_status_type: ["PENDING", "PARSED", "PARTIAL_PARSE", "FAILED"],
-      rebuy_status_type: ["Rebuy", "Test", "Do Not Rebuy"],
+      rebuy_status_type: ["Rebuy", "Test", "Do Not Rebuy", "Core", "Failed"],
       receipt_type: ["sams_scan_and_go", "walmart_store", "walmart_delivery"],
       vendor_type: ["sams", "walmart"],
     },

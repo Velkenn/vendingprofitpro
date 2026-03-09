@@ -29,7 +29,7 @@ import { useToast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
 
 type Sku = Tables<"skus">;
-type RebuyStatus = "Rebuy" | "Test" | "Do Not Rebuy";
+type RebuyStatus = "Rebuy" | "Test" | "Do Not Rebuy" | "Core" | "Failed";
 
 interface EditForm {
   sku_name: string;
@@ -84,7 +84,9 @@ export default function SKUs() {
 
   const rebuyColor = (s: string) => {
     if (s === "Rebuy") return "bg-primary/10 text-primary";
+    if (s === "Core") return "bg-chart-2/10 text-chart-2";
     if (s === "Do Not Rebuy") return "bg-destructive/10 text-destructive";
+    if (s === "Failed") return "bg-destructive/10 text-destructive";
     return "bg-accent/10 text-accent";
   };
 
@@ -228,7 +230,9 @@ export default function SKUs() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="Rebuy">Rebuy</SelectItem>
+                          <SelectItem value="Core">Core</SelectItem>
                           <SelectItem value="Test">Test</SelectItem>
+                          <SelectItem value="Failed">Failed</SelectItem>
                           <SelectItem value="Do Not Rebuy">Do Not Rebuy</SelectItem>
                         </SelectContent>
                       </Select>
