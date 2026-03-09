@@ -230,7 +230,9 @@ export default function SKUs() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="Rebuy">Rebuy</SelectItem>
+                          <SelectItem value="Core">Core</SelectItem>
                           <SelectItem value="Test">Test</SelectItem>
+                          <SelectItem value="Failed">Failed</SelectItem>
                           <SelectItem value="Do Not Rebuy">Do Not Rebuy</SelectItem>
                         </SelectContent>
                       </Select>
