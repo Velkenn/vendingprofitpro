@@ -1,28 +1,35 @@
 
 
-## Make Needs Review Items Interactive
+## Merge Upload into Receipts + New Stats Tab
 
-Currently the Needs Review page is read-only -- items are displayed but cannot be tapped or edited. The purpose of this queue is to let users resolve items that need SKU mapping or corrections.
+### Overview
+Move the upload flow into the Receipts page (inline), repurpose the `/upload` route and bottom nav tab as a **Stats** dashboard showing SKU purchase volume, unit economics, and time-filtered business totals.
 
 ### Changes
 
-**`src/pages/NeedsReview.tsx`** -- Full rework to make each item actionable:
+**`src/pages/Receipts.tsx`** — Add inline upload flow
+- Import the upload logic from Upload.tsx (file picker, upload+parse states, polling)
+- The existing "Upload" button at top-right triggers the inline flow (expands a card with file picker + progress states within the Receipts page)
+- After successful parse, refresh the receipts list and collapse the upload card
 
-1. **Tappable cards** -- Each item card becomes clickable, expanding an inline edit form (or navigating to the parent receipt detail).
+**`src/pages/Stats.tsx`** — New file (replaces Upload.tsx)
+- Fetch all `receipt_items` joined with `skus` (for sku_name, sell_price) and `receipts` (for receipt_date), filtering `is_personal = false`
+- **SKU Leaderboard section**: Group by sku_id, sum `qty * pack_size` as total units, compute avg unit_cost and profit per unit (`sell_price - unit_cost`). Sort by total units descending. Show top 10 prominently, rest in a scrollable list below.
+- **Summary cards with time tabs** (Week / Month / Year / Lifetime): Filter receipt_items by receipt_date range. Show:
+  - Total Business Spend (sum of line_total where not personal)
+  - Total Profit (sum of `(sell_price - unit_cost) * qty * pack_size` where sell_price exists)
+  - Avg Unit Cost, Avg Unit Profit
+  - Total Units Purchased
 
-2. **Inline resolution form** per item with:
-   - **Normalized name** -- editable text field (pre-filled with `raw_name`)
-   - **SKU mapping** -- a searchable dropdown of existing SKUs from the `skus` table. Selecting one sets `sku_id` on the item.
-   - **Mark as personal** toggle (`is_personal`)
-   - **Qty / Pack size / Line total** -- editable fields
-   - **"Approve" button** -- saves changes, sets `needs_review = false`, removes item from the list
-   - **"Skip" button** -- collapse without saving
+**`src/components/BottomNav.tsx`** — Change Upload tab to Stats
+- Replace `Upload` icon with `BarChart3`, label "Stats", path `/stats`
 
-3. **Fetch SKUs** on mount for the dropdown options (query `skus` table ordered by `sku_name`).
+**`src/App.tsx`** — Update routes
+- Replace `/upload` route with `/stats` pointing to new Stats component
+- Keep Upload import removed; add Stats import
 
-4. **On approve**: Update the `receipt_items` row with edited fields + `needs_review: false`, then remove it from the local list with a toast confirmation.
+**`src/pages/Upload.tsx`** — Delete (logic moves into Receipts.tsx)
 
-5. **Count badge** in the header showing total items remaining.
-
-This keeps the workflow minimal-tap: open page, tap item, pick SKU or edit name, hit Approve -- done.
+### Data query approach
+Single query: `receipt_items` with `receipts!inner(receipt_date)` and `skus(sku_name, sell_price)`, filtered by user. All aggregation done client-side since data volume is manageable per-user.
 
