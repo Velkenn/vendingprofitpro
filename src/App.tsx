@@ -10,7 +10,7 @@ import ResetPassword from "@/pages/ResetPassword";
 import Index from "@/pages/Index";
 import Receipts from "@/pages/Receipts";
 import ReceiptDetail from "@/pages/ReceiptDetail";
-import Upload from "@/pages/Upload";
+import Stats from "@/pages/Stats";
 import SKUs from "@/pages/SKUs";
 import NeedsReview from "@/pages/NeedsReview";
 import NeedsPrice from "@/pages/NeedsPrice";
@@ -39,7 +39,7 @@ function AppRoutes() {
         <Route path="/" element={<Index />} />
         <Route path="/receipts" element={<Receipts />} />
         <Route path="/receipts/:id" element={<ReceiptDetail />} />
-        <Route path="/upload" element={<Upload />} />
+        <Route path="/stats" element={<Stats />} />
         <Route path="/skus" element={<SKUs />} />
         <Route path="/needs-review" element={<NeedsReview />} />
         <Route path="/needs-price" element={<NeedsPrice />} />

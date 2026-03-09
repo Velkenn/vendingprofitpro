@@ -1,11 +1,11 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Receipt, Package, Upload, Settings } from "lucide-react";
+import { LayoutDashboard, Receipt, Package, BarChart3, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
   { path: "/", icon: LayoutDashboard, label: "Home" },
   { path: "/receipts", icon: Receipt, label: "Receipts" },
-  { path: "/upload", icon: Upload, label: "Upload" },
+  { path: "/stats", icon: BarChart3, label: "Stats" },
   { path: "/skus", icon: Package, label: "SKUs" },
   { path: "/settings", icon: Settings, label: "More" },
 ];
@@ -28,7 +28,7 @@ export default function BottomNav() {
                 active ? "text-primary font-semibold" : "text-muted-foreground"
               )}
             >
-              <Icon className={cn("h-5 w-5", path === "/upload" && "h-6 w-6")} />
+              <Icon className={cn("h-5 w-5", path === "/stats" && "h-6 w-6")} />
               <span>{label}</span>
             </button>
           );
