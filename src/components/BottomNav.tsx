@@ -28,7 +28,7 @@ export default function BottomNav() {
                 active ? "text-primary font-semibold" : "text-muted-foreground"
               )}
             >
-              <Icon className={cn("h-5 w-5", path === "/upload" && "h-6 w-6")} />
+              <Icon className={cn("h-5 w-5", path === "/stats" && "h-6 w-6")} />
               <span>{label}</span>
             </button>
           );
