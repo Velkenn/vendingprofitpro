@@ -39,7 +39,7 @@ function AppRoutes() {
         <Route path="/" element={<Index />} />
         <Route path="/receipts" element={<Receipts />} />
         <Route path="/receipts/:id" element={<ReceiptDetail />} />
-        <Route path="/upload" element={<Upload />} />
+        <Route path="/stats" element={<Stats />} />
         <Route path="/skus" element={<SKUs />} />
         <Route path="/needs-review" element={<NeedsReview />} />
         <Route path="/needs-price" element={<NeedsPrice />} />
