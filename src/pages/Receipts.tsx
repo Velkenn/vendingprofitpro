@@ -134,10 +134,119 @@ export default function Receipts() {
     <div className="px-4 pt-6">
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-bold tracking-tight">Receipts</h1>
-        <Button size="sm" onClick={() => navigate("/upload")} className="gap-1">
+        <Button size="sm" onClick={handleUploadClick} className="gap-1">
           <Plus className="h-4 w-4" /> Upload
         </Button>
       </div>
+
+      {/* Inline Upload Flow */}
+      {uploadExpanded && (
+        <Card className={`mb-4 ${uploadState === "idle" ? "border-2 border-dashed border-primary/30" : "border-0 shadow-sm"}`}>
+          <CardContent className={`${uploadState === "idle" ? "p-10" : "p-6"}`}>
+            {uploadState === "idle" && (
+              <div 
+                className="flex flex-col items-center gap-3 text-center cursor-pointer"
+                onClick={() => fileRef.current?.click()}
+              >
+                {file ? (
+                  <>
+                    <FileText className="h-10 w-10 text-primary" />
+                    <p className="font-medium text-sm">{file.name}</p>
+                    <p className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(0)} KB</p>
+                    <div className="flex gap-2 w-full mt-2">
+                      <Button variant="outline" className="flex-1" onClick={(e) => { e.stopPropagation(); handleUploadReset(); }}>
+                        Cancel
+                      </Button>
+                      <Button className="flex-1 gap-2" onClick={(e) => { e.stopPropagation(); handleUpload(); }}>
+                        <UploadIcon className="h-4 w-4" />
+                        Upload & Parse
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <UploadIcon className="h-10 w-10 text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">Tap to select a PDF receipt</p>
+                    <p className="text-xs text-muted-foreground">Sam's Club or Walmart</p>
+                    <Button variant="outline" size="sm" className="mt-2" onClick={(e) => { e.stopPropagation(); handleUploadReset(); }}>
+                      Cancel
+                    </Button>
+                  </>
+                )}
+              </div>
+            )}
+
+            {uploadState === "uploading" && (
+              <div className="flex items-center gap-3">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                <div>
+                  <p className="font-medium text-sm">Uploading...</p>
+                  <p className="text-xs text-muted-foreground">Please wait</p>
+                </div>
+              </div>
+            )}
+
+            {uploadState === "parsing" && (
+              <div className="flex items-center gap-3">
+                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                <div>
+                  <p className="font-medium text-sm">Analyzing your receipt...</p>
+                  <p className="text-xs text-muted-foreground">This usually takes 10–20 seconds</p>
+                </div>
+              </div>
+            )}
+
+            {uploadState === "done" && uploadReceipt && (
+              <div className="flex items-center gap-3">
+                <CheckCircle className="h-5 w-5 text-primary" />
+                <div className="flex-1">
+                  <p className="font-medium text-sm">Receipt processed!</p>
+                  <p className="text-xs text-muted-foreground">
+                    {uploadReceipt.item_count ? `Found ${uploadReceipt.item_count} items` : "Items extracted"}
+                    {uploadReceipt.total ? ` · $${Number(uploadReceipt.total).toFixed(2)} total` : ""}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={handleUploadReset}>
+                    Upload Another
+                  </Button>
+                  <Button size="sm" onClick={() => navigate(`/receipts/${uploadReceipt.id}`)}>
+                    View Receipt
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {uploadState === "error" && (
+              <div className="flex items-center gap-3">
+                <XCircle className="h-5 w-5 text-destructive" />
+                <div className="flex-1">
+                  <p className="font-medium text-sm">Something went wrong</p>
+                  <p className="text-xs text-muted-foreground">{errorMsg}</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={handleUploadReset}>
+                    Try Again
+                  </Button>
+                  {uploadReceipt && (
+                    <Button size="sm" onClick={() => navigate(`/receipts/${uploadReceipt.id}`)}>
+                      View Anyway
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".pdf"
+        className="hidden"
+        onChange={(e) => setFile(e.target.files?.[0] || null)}
+      />
 
       {loading ? (
         <p className="text-sm text-muted-foreground">Loading...</p>
