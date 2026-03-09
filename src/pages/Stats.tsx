@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { BarChart3, Package, DollarSign, TrendingUp } from "lucide-react";
 import type { Tables } from "@/integrations/supabase/types";
 import { startOfWeek, startOfMonth, startOfYear, isAfter } from "date-fns";
@@ -169,11 +169,9 @@ export default function Stats() {
   const filteredItems = getFilteredItems(timeFilter);
   const skuStats = calculateSkuStats(filteredItems);
   const metrics = calculateBusinessMetrics(filteredItems);
-  const topSkus = skuStats.slice(0, 10);
-  const remainingSkus = skuStats.slice(10);
 
   return (
-    <div className="px-4 pt-6 space-y-6">
+    <div className="px-4 pt-6 space-y-4">
       <div className="flex items-center gap-2">
         <BarChart3 className="h-6 w-6 text-primary" />
         <h1 className="text-2xl font-bold tracking-tight">Business Stats</h1>
@@ -188,48 +186,48 @@ export default function Stats() {
           <TabsTrigger value="lifetime">Lifetime</TabsTrigger>
         </TabsList>
 
-        <TabsContent value={timeFilter} className="space-y-6">
+        <TabsContent value={timeFilter} className="space-y-4">
           {/* Summary Cards */}
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-3">
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1">
                 <CardTitle className="text-sm font-medium">Total Spend</CardTitle>
                 <DollarSign className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-4 pt-0">
                 <div className="text-2xl font-bold">${metrics.total_spend.toFixed(2)}</div>
                 <p className="text-xs text-muted-foreground">Business purchases</p>
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1">
                 <CardTitle className="text-sm font-medium">Total Profit</CardTitle>
                 <TrendingUp className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-4 pt-0">
                 <div className="text-2xl font-bold">${metrics.total_profit.toFixed(2)}</div>
                 <p className="text-xs text-muted-foreground">Estimated profit</p>
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1">
                 <CardTitle className="text-sm font-medium">Avg Unit Cost</CardTitle>
                 <Package className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-4 pt-0">
                 <div className="text-2xl font-bold">${metrics.avg_unit_cost.toFixed(2)}</div>
                 <p className="text-xs text-muted-foreground">Per unit purchased</p>
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1">
                 <CardTitle className="text-sm font-medium">Total Units</CardTitle>
                 <Package className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
-              <CardContent>
+              <CardContent className="p-4 pt-0">
                 <div className="text-2xl font-bold">{metrics.total_units.toLocaleString()}</div>
                 <p className="text-xs text-muted-foreground">Units purchased</p>
               </CardContent>
@@ -238,22 +236,21 @@ export default function Stats() {
 
           {/* SKU Leaderboard */}
           <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Top SKUs by Volume</CardTitle>
+            <CardHeader className="pb-1">
+              <CardTitle className="text-lg">SKU Performance</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {topSkus.length === 0 ? (
+            <CardContent className="p-4 pt-0">
+              {skuStats.length === 0 ? (
                 <p className="text-sm text-muted-foreground text-center py-8">
                   No business purchases found for this period.
                 </p>
               ) : (
-                <>
-                  {/* Top 10 */}
-                  <div className="space-y-3">
-                    {topSkus.map((sku, index) => (
-                      <div key={sku.sku_id} className="flex items-center justify-between p-3 rounded-lg border">
-                        <div className="flex items-center gap-3">
-                          <Badge variant="secondary" className="w-8 h-8 rounded-full flex items-center justify-center text-xs">
+                <ScrollArea className="h-[500px] pr-4">
+                  <div className="space-y-1">
+                    {skuStats.map((sku, index) => (
+                      <div key={sku.sku_id} className="flex items-center justify-between py-2 px-3 rounded-lg border">
+                        <div className="flex items-center gap-2">
+                          <Badge variant={index < 10 ? "default" : "secondary"} className="w-7 h-7 rounded-full flex items-center justify-center text-xs">
                             {index + 1}
                           </Badge>
                           <div>
@@ -272,40 +269,7 @@ export default function Stats() {
                       </div>
                     ))}
                   </div>
-
-                  {/* Remaining SKUs */}
-                  {remainingSkus.length > 0 && (
-                    <>
-                      <Separator />
-                      <div className="max-h-64 overflow-y-auto space-y-2">
-                        <p className="text-sm font-medium text-muted-foreground mb-2">
-                          Remaining SKUs ({remainingSkus.length})
-                        </p>
-                        {remainingSkus.map((sku, index) => (
-                          <div key={sku.sku_id} className="flex items-center justify-between py-2 px-3 rounded border">
-                            <div className="flex items-center gap-3">
-                              <span className="text-xs text-muted-foreground w-6">
-                                {index + 11}
-                              </span>
-                              <div>
-                                <p className="text-sm leading-tight">{sku.sku_name}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  {sku.total_units} units
-                                </p>
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <p className="text-sm">${sku.avg_unit_cost.toFixed(2)}</p>
-                              <p className={`text-xs ${sku.profit_per_unit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                                {sku.profit_per_unit >= 0 ? '+' : ''}${sku.profit_per_unit.toFixed(2)}
-                              </p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </>
-                  )}
-                </>
+                </ScrollArea>
               )}
             </CardContent>
           </Card>
