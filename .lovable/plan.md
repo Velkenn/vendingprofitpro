@@ -1,27 +1,28 @@
 
-## Simplify Settings Tab
 
-### What's changing
-The Settings page currently has a navigation menu with 6 links (Needs Review, Needs Price, Purchases, Cost Trends, Profit Leaderboard, Export Reports) plus the Week Start Day picker and a Sign Out button.
+## Make Needs Review Items Interactive
 
-The request is to:
-1. Remove the navigation menu items (all 6 links)
-2. Keep Week Start Day picker
-3. Replace the Export link with inline export buttons (Receipts, Receipt Items, SKUs CSVs) directly on the settings page — no separate /export route needed
-4. Keep Sign Out button
+Currently the Needs Review page is read-only -- items are displayed but cannot be tapped or edited. The purpose of this queue is to let users resolve items that need SKU mapping or corrections.
 
-### Changes needed
+### Changes
 
-**`src/pages/SettingsPage.tsx`** — the only file that needs editing:
-- Remove the `menuItems` array and the navigation card list
-- Remove unused imports: `useNavigate`, `AlertTriangle`, `Tag`, `ShoppingCart`, `TrendingUp`, `Trophy`, `ChevronRight`
-- Add the CSV download logic (copy from Export.tsx) and inline export section with three CSV buttons (Receipts, Receipt Items, SKUs)
-- Keep Week Start Day section and Sign Out button
+**`src/pages/NeedsReview.tsx`** -- Full rework to make each item actionable:
 
-The `/export` route and `Export.tsx` file can remain as-is (they're registered in App.tsx and removing them would require touching App.tsx too — unnecessary risk for no UI benefit since the page will no longer be linked).
+1. **Tappable cards** -- Each item card becomes clickable, expanding an inline edit form (or navigating to the parent receipt detail).
 
-### Result
-Settings page will show:
-1. Export Data section with three CSV download buttons
-2. Week Start Day picker
-3. Sign Out button
+2. **Inline resolution form** per item with:
+   - **Normalized name** -- editable text field (pre-filled with `raw_name`)
+   - **SKU mapping** -- a searchable dropdown of existing SKUs from the `skus` table. Selecting one sets `sku_id` on the item.
+   - **Mark as personal** toggle (`is_personal`)
+   - **Qty / Pack size / Line total** -- editable fields
+   - **"Approve" button** -- saves changes, sets `needs_review = false`, removes item from the list
+   - **"Skip" button** -- collapse without saving
+
+3. **Fetch SKUs** on mount for the dropdown options (query `skus` table ordered by `sku_name`).
+
+4. **On approve**: Update the `receipt_items` row with edited fields + `needs_review: false`, then remove it from the local list with a toast confirmation.
+
+5. **Count badge** in the header showing total items remaining.
+
+This keeps the workflow minimal-tap: open page, tap item, pick SKU or edit name, hit Approve -- done.
+
