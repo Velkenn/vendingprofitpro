@@ -29,7 +29,7 @@ import { useToast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
 
 type Sku = Tables<"skus">;
-type RebuyStatus = "Rebuy" | "Test" | "Do Not Rebuy";
+type RebuyStatus = "Rebuy" | "Test" | "Do Not Rebuy" | "Core" | "Failed";
 
 interface EditForm {
   sku_name: string;
