@@ -10,7 +10,7 @@ import ResetPassword from "@/pages/ResetPassword";
 import Index from "@/pages/Index";
 import Receipts from "@/pages/Receipts";
 import ReceiptDetail from "@/pages/ReceiptDetail";
-import Upload from "@/pages/Upload";
+import Stats from "@/pages/Stats";
 import SKUs from "@/pages/SKUs";
 import NeedsReview from "@/pages/NeedsReview";
 import NeedsPrice from "@/pages/NeedsPrice";
