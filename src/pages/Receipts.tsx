@@ -15,9 +15,19 @@ type UploadState = "idle" | "uploading" | "parsing" | "done" | "error";
 
 export default function Receipts() {
   const { user } = useAuth();
+  const { toast } = useToast();
   const navigate = useNavigate();
+  const fileRef = useRef<HTMLInputElement>(null);
   const [receipts, setReceipts] = useState<Tables<"receipts">[]>([]);
   const [loading, setLoading] = useState(true);
+  
+  // Upload state
+  const [uploadExpanded, setUploadExpanded] = useState(false);
+  const [file, setFile] = useState<File | null>(null);
+  const [uploadState, setUploadState] = useState<UploadState>("idle");
+  const [uploadReceipt, setUploadReceipt] = useState<Tables<"receipts"> | null>(null);
+  const [errorMsg, setErrorMsg] = useState("");
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (!user) return;
