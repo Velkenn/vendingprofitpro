@@ -216,7 +216,40 @@ For normalized names, use format: {Brand/Product} – {Flavor/Variant}`,
       });
     }
 
-    const parsed = JSON.parse(toolCall.function.arguments);
+    let parsed: any;
+    try {
+      parsed = JSON.parse(toolCall.function.arguments);
+    } catch (jsonErr) {
+      // Attempt to salvage truncated JSON from LLM
+      let cleaned = toolCall.function.arguments || "";
+      // Remove trailing commas
+      cleaned = cleaned.replace(/,\s*$/g, "");
+      // Remove control characters
+      cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, "");
+      // Try to close unclosed structures
+      let braces = 0, brackets = 0;
+      for (const ch of cleaned) {
+        if (ch === '{') braces++;
+        if (ch === '}') braces--;
+        if (ch === '[') brackets++;
+        if (ch === ']') brackets--;
+      }
+      // Close any open arrays/objects
+      while (brackets > 0) { cleaned += "]"; brackets--; }
+      while (braces > 0) { cleaned += "}"; braces--; }
+      // Remove trailing commas before closing brackets/braces
+      cleaned = cleaned.replace(/,\s*]/g, "]").replace(/,\s*}/g, "}");
+      try {
+        parsed = JSON.parse(cleaned);
+        console.log("Recovered truncated JSON successfully");
+      } catch (finalErr) {
+        console.error("JSON recovery failed:", finalErr, "Raw:", toolCall.function.arguments?.substring(0, 200));
+        await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
+        return new Response(JSON.stringify({ error: "Failed to parse AI response" }), {
+          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
 
     // Get the receipt user_id
     const { data: receiptData } = await supabase
