@@ -1,30 +1,69 @@
 
 
-## Add Quarterly Tax Filters and Store Spend Breakdown
+## Replace AI Parsing with Regex-Based Parser (AI Fallback)
 
-### Changes needed
+### What's changing
+Phase 2 of `parse-receipt` currently sends the extracted PDF text to an AI model for structured parsing. This will be replaced with deterministic regex-based parsing for Sam's Club and Walmart receipts, using AI only as a fallback if regex extracts zero items.
 
-**File: `src/pages/Stats.tsx`** — single file edit
+### How it works
 
-#### 1. Add quarterly time filter options
-- Expand `TimeFilter` type to include `"q1" | "q2" | "q3" | "q4"`
-- Add a second row of filter buttons below the existing Week/Month/Year/Lifetime tabs for the quarters: Q1 (Jan-Mar), Q2 (Apr-Jun), Q3 (Jul-Sep), Q4 (Oct-Dec)
-- These will use the current year's quarter date ranges
-- Update `getFilteredItems` to handle quarter filters by computing start/end dates for each quarter of the current year
+**File: `supabase/functions/parse-receipt/index.ts`**
 
-#### 2. Add Store Spend Breakdown card
-- Need to also fetch `vendor` (and optionally `store_location`) from the `receipts` join — currently only fetching `receipt_date`
-- Update the query select to include `receipts!inner(receipt_date, vendor, store_location)`
-- Update the `ReceiptItemWithJoins` type to include `vendor` and `store_location`
-- Add a new function `calculateStoreSpend` that groups filtered items by vendor (or store_location if available), sums `line_total`, and calculates each store's percentage of total spend
-- Render a new "Spend by Store" card below the SKU Performance card showing each store with its total and percentage
+#### 1. Add regex parser functions
 
-#### 3. Quarter filter UI approach
-- Use a second `TabsList`-style row or a set of toggle buttons beneath the existing time filter tabs
-- Labels: "Q1 Jan-Mar", "Q2 Apr-Jun", "Q3 Jul-Sep", "Q4 Oct-Dec"
-- Selecting a quarter deselects the week/month/year/lifetime filter and vice versa
+Three parser functions, each returning the same structure the AI currently produces:
+
+- **`parseSamsReceipt(text)`** — Sam's Club Scan & Go format:
+  - Detect via "Scan & Go" or "Sam's Club" in text
+  - Items typically: item number, description, qty, price on structured lines
+  - Extract date from patterns like "MM/DD/YYYY"
+  - Extract TC number, subtotal, tax, total
+  - Extract store location
+
+- **`parseWalmartStoreReceipt(text)`** — Walmart in-store:
+  - Items appear as description followed by price, with optional "qty @ price/ea"
+  - Extract ST#/OP#/TE#/TR# identifiers
+  - Extract date, subtotal, tax, total
+
+- **`parseWalmartDeliveryReceipt(text)`** — Walmart delivery/online:
+  - Detect via "Order#" or delivery-related keywords
+  - Items with quantities and prices in delivery format
+
+Each returns: `{ receipt_type, vendor, receipt_date, receipt_identifier, store_location, item_count, subtotal, tax, total, items[] }`
+
+#### 2. Add orchestrator function
+
+`parseReceiptText(rawText)` that:
+1. Detects receipt type from text keywords
+2. Calls the appropriate parser
+3. Returns parsed result or `null` if zero items found
+
+#### 3. Update Phase 2 flow
+
+Replace the current AI-only Phase 2 with:
+```
+1. Try regex parsing via parseReceiptText(rawText)
+2. If result has items → use it (no AI cost)
+3. If result is null or has 0 items → fall back to existing AI call
+```
+
+#### 4. Improve pdfjs text extraction
+
+Currently joins all text items with spaces (losing line structure). Change to preserve positional info by grouping text items by Y-coordinate to reconstruct lines — this makes regex patterns much more reliable.
+
+### Key patterns to handle
+
+**Sam's Club** — items like: `981234 MONSTER ENRGY 1 8.98 E`
+- Regex: `/^(\d{5,7})\s+(.+?)\s+(\d+)\s+(\d+\.\d{2})\s*[A-Z]?$/`
+
+**Walmart in-store** — items like: `GREAT VALUE WATER    3.98 O` or `2 @ 1.99/ea  3.98`
+- Price at end of line, optional tax code letter
+- Multi-quantity with `@ price/ea` pattern
+
+**Walmart delivery** — items with qty × price format
 
 ### Result
-- Users can filter stats by tax quarters for sales tax reporting
-- New card shows spend breakdown per store (Sam's, Walmart) with dollar amounts and percentages
+- Most receipts parse instantly with zero AI cost
+- AI fallback ensures new/unusual formats still work
+- Faster processing (no network round-trip to AI for Phase 2)
 
