@@ -15,10 +15,7 @@ const EXTRACT_TOOL = {
     parameters: {
       type: "object",
       properties: {
-        receipt_type: {
-          type: "string",
-          enum: ["sams_scan_and_go", "walmart_store", "walmart_delivery"],
-        },
+        receipt_type: { type: "string", enum: ["sams_scan_and_go", "walmart_store", "walmart_delivery"] },
         vendor: { type: "string", enum: ["sams", "walmart"] },
         receipt_date: { type: "string", description: "YYYY-MM-DD format" },
         receipt_identifier: { type: "string", description: "TC number or Order number" },
@@ -33,10 +30,10 @@ const EXTRACT_TOOL = {
             type: "object",
             properties: {
               raw_name: { type: "string" },
-              normalized_name: { type: "string", description: "Format: Brand/Product – Flavor" },
+              normalized_name: { type: "string" },
               qty: { type: "integer" },
-              pack_size: { type: "integer", description: "Pack count (pk/ct) if present" },
-              pack_size_uom: { type: "string", description: "e.g. pk, ct, oz" },
+              pack_size: { type: "integer" },
+              pack_size_uom: { type: "string" },
               line_total: { type: "number" },
               unit_cost: { type: "number" },
             },
@@ -51,18 +48,446 @@ const EXTRACT_TOOL = {
   },
 };
 
+interface ParsedItem {
+  raw_name: string;
+  normalized_name?: string;
+  qty: number;
+  pack_size?: number;
+  pack_size_uom?: string;
+  line_total: number;
+  unit_cost?: number;
+}
+
+interface ParsedReceipt {
+  receipt_type: string;
+  vendor: string;
+  receipt_date: string;
+  receipt_identifier?: string;
+  store_location?: string;
+  item_count: number;
+  subtotal?: number;
+  tax?: number;
+  total?: number;
+  items: ParsedItem[];
+}
+
+// Extract text from PDF preserving line structure by grouping by Y-coordinate
 async function extractPdfText(pdfBytes: Uint8Array): Promise<string> {
   const doc = await getDocument(pdfBytes).promise;
   const pages: string[] = [];
   for (let i = 1; i <= doc.numPages; i++) {
     const page = await doc.getPage(i);
     const textContent = await page.getTextContent();
-    const pageText = textContent.items.map((item: any) => item.str).join(" ");
-    pages.push(`--- Page ${i} ---\n${pageText}`);
+    
+    // Group text items by Y position to reconstruct lines
+    const lineMap = new Map<number, { x: number; str: string }[]>();
+    for (const item of textContent.items as any[]) {
+      if (!item.str || item.str.trim() === "") continue;
+      // Round Y to nearest integer to group items on the same line
+      const y = Math.round(item.transform[5]);
+      if (!lineMap.has(y)) lineMap.set(y, []);
+      lineMap.get(y)!.push({ x: item.transform[4], str: item.str });
+    }
+    
+    // Sort by Y descending (PDF coordinates: top = higher Y), then X ascending within each line
+    const sortedYs = Array.from(lineMap.keys()).sort((a, b) => b - a);
+    const lineTexts: string[] = [];
+    for (const y of sortedYs) {
+      const items = lineMap.get(y)!.sort((a, b) => a.x - b.x);
+      lineTexts.push(items.map(i => i.str).join("  "));
+    }
+    
+    pages.push(`--- Page ${i} ---\n${lineTexts.join("\n")}`);
   }
   return pages.join("\n\n");
 }
 
+// Extract a date in MM/DD/YYYY or MM/DD/YY format and return as YYYY-MM-DD
+function extractDate(text: string): string | null {
+  const m = text.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/);
+  if (!m) return null;
+  const month = m[1].padStart(2, "0");
+  const day = m[2].padStart(2, "0");
+  let year = m[3];
+  if (year.length === 2) year = "20" + year;
+  return `${year}-${month}-${day}`;
+}
+
+// Extract a dollar amount from text
+function extractAmount(text: string, pattern: RegExp): number | null {
+  const m = text.match(pattern);
+  if (!m) return null;
+  return parseFloat(m[1]);
+}
+
+// Extract pack size info from item name
+function extractPackSize(name: string): { pack_size?: number; pack_size_uom?: string } {
+  const m = name.match(/(\d+)\s*(pk|ct|oz|fl\s*oz|count|pack)\b/i);
+  if (!m) return {};
+  return { pack_size: parseInt(m[1]), pack_size_uom: m[2].toLowerCase().replace(/\s+/g, "") };
+}
+
+// ─── SAM'S CLUB PARSER ────────────────────────────────────────────
+function parseSamsReceipt(text: string): ParsedReceipt | null {
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const items: ParsedItem[] = [];
+
+  // Detect Scan & Go vs regular Sam's
+  const isScanAndGo = /scan\s*&\s*go/i.test(text);
+  const receiptType = isScanAndGo ? "sams_scan_and_go" : "sams_scan_and_go"; // default to scan_and_go for sams
+
+  // Extract date
+  const receiptDate = extractDate(text) || new Date().toISOString().slice(0, 10);
+
+  // Extract TC number
+  const tcMatch = text.match(/TC#?\s*:?\s*(\d[\d\s\-]+\d)/i);
+  const receiptIdentifier = tcMatch ? tcMatch[1].replace(/\s+/g, "") : undefined;
+
+  // Extract store location
+  const storeMatch = text.match(/(?:Sam'?s\s*Club)\s*#?\s*(\d+)/i) || text.match(/Club\s*#?\s*(\d+)/i);
+  const storeLocation = storeMatch ? `Sam's Club #${storeMatch[1]}` : undefined;
+
+  // Sam's Club item patterns:
+  // Pattern 1: "981234  MONSTER ENRGY  1  8.98  E"
+  // Pattern 2: "ITEM DESCRIPTION  8.98  E"
+  const samsItemRegex = /^(\d{4,8})?\s*(.+?)\s{2,}(\d+)\s{2,}(-?\d+\.\d{2})\s*[A-Z]?\s*$/;
+  const samsItemRegex2 = /^(.+?)\s{2,}(\d+)\s{2,}(-?\d+\.\d{2})\s*[A-Z]?\s*$/;
+  // Simple pattern: description followed by price at end
+  const simpleItemRegex = /^(\d{4,8})?\s*(.+?)\s+(-?\d+\.\d{2})\s*[A-Z]?\s*$/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Skip header/footer lines
+    if (/^(subtotal|tax|total|change|visa|mastercard|amex|debit|cash|member|thank|---|page|\*)/i.test(line)) continue;
+    if (/TC#|Scan\s*&\s*Go|Sam'?s\s*Club|^\d{1,2}[\/\-]\d{1,2}[\/\-]/i.test(line)) continue;
+
+    let match = line.match(samsItemRegex);
+    if (match) {
+      const rawName = (match[1] ? match[1] + " " : "") + match[2].trim();
+      const qty = parseInt(match[3]);
+      const lineTotal = parseFloat(match[4]);
+      const packInfo = extractPackSize(rawName);
+      const divisor = qty * (packInfo.pack_size || 1);
+      items.push({
+        raw_name: rawName,
+        qty,
+        line_total: lineTotal,
+        unit_cost: divisor > 0 ? Math.round((lineTotal / divisor) * 100) / 100 : undefined,
+        ...packInfo,
+      });
+      continue;
+    }
+
+    match = line.match(samsItemRegex2);
+    if (match) {
+      const rawName = match[1].trim();
+      const qty = parseInt(match[2]);
+      const lineTotal = parseFloat(match[3]);
+      if (rawName.length < 3) continue;
+      const packInfo = extractPackSize(rawName);
+      const divisor = qty * (packInfo.pack_size || 1);
+      items.push({
+        raw_name: rawName,
+        qty,
+        line_total: lineTotal,
+        unit_cost: divisor > 0 ? Math.round((lineTotal / divisor) * 100) / 100 : undefined,
+        ...packInfo,
+      });
+      continue;
+    }
+
+    match = line.match(simpleItemRegex);
+    if (match) {
+      const rawName = ((match[1] || "") + " " + match[2]).trim();
+      const lineTotal = parseFloat(match[3]);
+      if (rawName.length < 3 || lineTotal === 0) continue;
+      // Skip if it looks like a summary line
+      if (/subtotal|tax|total|balance|tender/i.test(rawName)) continue;
+      const packInfo = extractPackSize(rawName);
+      items.push({
+        raw_name: rawName,
+        qty: 1,
+        line_total: lineTotal,
+        unit_cost: lineTotal / (packInfo.pack_size || 1),
+        ...packInfo,
+      });
+    }
+  }
+
+  if (items.length === 0) return null;
+
+  const subtotal = extractAmount(text, /subtotal\s*:?\s*\$?\s*(\d+\.\d{2})/i);
+  const tax = extractAmount(text, /tax\s*:?\s*\$?\s*(\d+\.\d{2})/i);
+  const total = extractAmount(text, /total\s*:?\s*\$?\s*(\d+\.\d{2})/i);
+
+  return {
+    receipt_type: receiptType,
+    vendor: "sams",
+    receipt_date: receiptDate,
+    receipt_identifier: receiptIdentifier,
+    store_location: storeLocation,
+    item_count: items.length,
+    subtotal: subtotal ?? undefined,
+    tax: tax ?? undefined,
+    total: total ?? undefined,
+    items,
+  };
+}
+
+// ─── WALMART IN-STORE PARSER ──────────────────────────────────────
+function parseWalmartStoreReceipt(text: string): ParsedReceipt | null {
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const items: ParsedItem[] = [];
+
+  const receiptDate = extractDate(text) || new Date().toISOString().slice(0, 10);
+
+  // Extract identifiers like ST# OP# TE# TR#
+  const idMatch = text.match(/TC#?\s*:?\s*([\d\s\-]+)/i) || text.match(/TR#?\s*:?\s*(\d+)/i);
+  const receiptIdentifier = idMatch ? idMatch[1].trim().replace(/\s+/g, "") : undefined;
+
+  // Store location
+  const storeMatch = text.match(/ST#?\s*:?\s*(\d+)/i) || text.match(/Walmart\s*(?:Store)?\s*#?\s*(\d+)/i);
+  const storeLocation = storeMatch ? `Walmart #${storeMatch[1]}` : undefined;
+
+  // Walmart patterns:
+  // "GREAT VALUE WATER  3.98 O"  (description, price, tax code)
+  // Then optionally on next line: "2 @ 1.99/ea" (multi-qty)
+  const walmartItemRegex = /^(.+?)\s{2,}(-?\d+\.\d{2})\s*([A-Z])?\s*$/;
+  const qtyLineRegex = /^(\d+)\s*@\s*(\d+\.\d{2})/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Skip header/footer/summary lines
+    if (/^(subtotal|tax|total|change|visa|mastercard|amex|debit|cash|tend|thank|---|ST#|OP#|TE#|TR#|\*|walmart|saving)/i.test(line)) continue;
+    if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]/.test(line)) continue;
+
+    const match = line.match(walmartItemRegex);
+    if (match) {
+      const rawName = match[1].trim();
+      const lineTotal = parseFloat(match[2]);
+
+      // Skip summary-like entries
+      if (/subtotal|tax|total|balance|tender|change due/i.test(rawName)) continue;
+      if (rawName.length < 2) continue;
+
+      let qty = 1;
+      // Check next line for qty pattern
+      if (i + 1 < lines.length) {
+        const qtyMatch = lines[i + 1].match(qtyLineRegex);
+        if (qtyMatch) {
+          qty = parseInt(qtyMatch[1]);
+          i++; // skip qty line
+        }
+      }
+
+      const packInfo = extractPackSize(rawName);
+      const divisor = qty * (packInfo.pack_size || 1);
+      items.push({
+        raw_name: rawName,
+        qty,
+        line_total: lineTotal,
+        unit_cost: divisor > 0 ? Math.round((lineTotal / divisor) * 100) / 100 : undefined,
+        ...packInfo,
+      });
+    }
+  }
+
+  if (items.length === 0) return null;
+
+  const subtotal = extractAmount(text, /subtotal\s*:?\s*\$?\s*(\d+\.\d{2})/i);
+  const tax = extractAmount(text, /tax\s*:?\s*\$?\s*(\d+\.\d{2})/i);
+  const total = extractAmount(text, /total\s*:?\s*\$?\s*(\d+\.\d{2})/i);
+
+  return {
+    receipt_type: "walmart_store",
+    vendor: "walmart",
+    receipt_date: receiptDate,
+    receipt_identifier: receiptIdentifier,
+    store_location: storeLocation,
+    item_count: items.length,
+    subtotal: subtotal ?? undefined,
+    tax: tax ?? undefined,
+    total: total ?? undefined,
+    items,
+  };
+}
+
+// ─── WALMART DELIVERY PARSER ──────────────────────────────────────
+function parseWalmartDeliveryReceipt(text: string): ParsedReceipt | null {
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const items: ParsedItem[] = [];
+
+  const receiptDate = extractDate(text) || new Date().toISOString().slice(0, 10);
+
+  const orderMatch = text.match(/Order\s*#?\s*:?\s*([\d\-]+)/i);
+  const receiptIdentifier = orderMatch ? orderMatch[1] : undefined;
+
+  // Delivery items often appear as: "Product Name  Qty X  $Price" or similar
+  // Pattern: description, qty, price
+  const deliveryItemRegex = /^(.+?)\s{2,}(?:(?:Qty|x)\s*)?(\d+)\s{2,}\$?(-?\d+\.\d{2})\s*$/i;
+  // Or: description then price (qty=1)
+  const simpleDeliveryRegex = /^(.+?)\s{2,}\$?(-?\d+\.\d{2})\s*$/;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (/^(subtotal|tax|total|order|delivery|shipping|thank|walmart|saving|fee|tip)/i.test(line)) continue;
+    if (/^\d{1,2}[\/\-]\d{1,2}[\/\-]/.test(line)) continue;
+
+    let match = line.match(deliveryItemRegex);
+    if (match) {
+      const rawName = match[1].trim();
+      const qty = parseInt(match[2]);
+      const lineTotal = parseFloat(match[3]);
+      if (rawName.length < 2 || /subtotal|tax|total|fee/i.test(rawName)) continue;
+      const packInfo = extractPackSize(rawName);
+      const divisor = qty * (packInfo.pack_size || 1);
+      items.push({
+        raw_name: rawName,
+        qty,
+        line_total: lineTotal,
+        unit_cost: divisor > 0 ? Math.round((lineTotal / divisor) * 100) / 100 : undefined,
+        ...packInfo,
+      });
+      continue;
+    }
+
+    match = line.match(simpleDeliveryRegex);
+    if (match) {
+      const rawName = match[1].trim();
+      const lineTotal = parseFloat(match[2]);
+      if (rawName.length < 2 || lineTotal === 0) continue;
+      if (/subtotal|tax|total|fee|delivery|shipping|tip|order|balance/i.test(rawName)) continue;
+      const packInfo = extractPackSize(rawName);
+      items.push({
+        raw_name: rawName,
+        qty: 1,
+        line_total: lineTotal,
+        unit_cost: lineTotal / (packInfo.pack_size || 1),
+        ...packInfo,
+      });
+    }
+  }
+
+  if (items.length === 0) return null;
+
+  const subtotal = extractAmount(text, /subtotal\s*:?\s*\$?\s*(\d+\.\d{2})/i);
+  const tax = extractAmount(text, /tax\s*:?\s*\$?\s*(\d+\.\d{2})/i);
+  const total = extractAmount(text, /total\s*:?\s*\$?\s*(\d+\.\d{2})/i);
+
+  return {
+    receipt_type: "walmart_delivery",
+    vendor: "walmart",
+    receipt_date: receiptDate,
+    receipt_identifier: receiptIdentifier,
+    store_location: undefined,
+    item_count: items.length,
+    subtotal: subtotal ?? undefined,
+    tax: tax ?? undefined,
+    total: total ?? undefined,
+    items,
+  };
+}
+
+// ─── ORCHESTRATOR ─────────────────────────────────────────────────
+function parseReceiptText(rawText: string): ParsedReceipt | null {
+  const lower = rawText.toLowerCase();
+
+  // Detect type and try appropriate parser
+  if (/sam'?s\s*club|scan\s*&\s*go/i.test(rawText)) {
+    const result = parseSamsReceipt(rawText);
+    if (result && result.items.length > 0) return result;
+  }
+
+  if (/order\s*#|delivery|walmart\.com/i.test(rawText)) {
+    const result = parseWalmartDeliveryReceipt(rawText);
+    if (result && result.items.length > 0) return result;
+  }
+
+  if (/walmart/i.test(rawText)) {
+    const result = parseWalmartStoreReceipt(rawText);
+    if (result && result.items.length > 0) return result;
+  }
+
+  // Try all parsers as fallback
+  for (const parser of [parseSamsReceipt, parseWalmartStoreReceipt, parseWalmartDeliveryReceipt]) {
+    const result = parser(rawText);
+    if (result && result.items.length > 0) return result;
+  }
+
+  return null;
+}
+
+// ─── AI FALLBACK (Phase 2 original) ──────────────────────────────
+async function parseWithAI(rawText: string, lovableApiKey: string): Promise<any> {
+  const parseResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${lovableApiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "google/gemini-2.5-flash",
+      max_tokens: 16384,
+      messages: [
+        {
+          role: "system",
+          content: `You are a receipt parser for vending machine businesses. Parse the raw receipt text and extract ALL items.
+
+Detect the receipt type:
+- "sams_scan_and_go" if it contains "Scan & Go"
+- "walmart_store" if it's a Walmart in-store receipt
+- "walmart_delivery" if it contains "Order" and delivery info
+
+Walmart receipts: Items appear as product descriptions followed by prices. Look for patterns like "qty @ price/ea" or standalone prices after descriptions. Each product+price = one item.
+
+Sam's Club receipts: Items may appear as single lines with item number, description, qty, and price.
+
+CRITICAL: You MUST extract EVERY item from the text. Count carefully and do not miss any items.
+
+Compute unit_cost = line_total / (qty * pack_size) if pack size exists, else line_total / qty.
+For normalized names, use format: {Brand/Product} – {Flavor/Variant}`,
+        },
+        {
+          role: "user",
+          content: `Here is the complete raw text extracted from ALL pages of the receipt:\n\n${rawText}\n\nParse ALL items from this text. Extract every single line item.`,
+        },
+      ],
+      tools: [EXTRACT_TOOL],
+      tool_choice: { type: "function", function: { name: "extract_receipt" } },
+    }),
+  });
+
+  if (!parseResponse.ok) {
+    const errText = await parseResponse.text();
+    throw new Error(`AI_ERROR:${parseResponse.status}:${errText}`);
+  }
+
+  const parseResult = await parseResponse.json();
+  const toolCall = parseResult.choices?.[0]?.message?.tool_calls?.[0];
+  if (!toolCall) throw new Error("AI did not return structured data");
+
+  try {
+    return JSON.parse(toolCall.function.arguments);
+  } catch {
+    // Attempt to salvage truncated JSON
+    let cleaned = toolCall.function.arguments || "";
+    cleaned = cleaned.replace(/,\s*$/g, "").replace(/[\x00-\x1F\x7F]/g, "");
+    let braces = 0, brackets = 0;
+    for (const ch of cleaned) {
+      if (ch === '{') braces++; if (ch === '}') braces--;
+      if (ch === '[') brackets++; if (ch === ']') brackets--;
+    }
+    while (brackets > 0) { cleaned += "]"; brackets--; }
+    while (braces > 0) { cleaned += "}"; braces--; }
+    cleaned = cleaned.replace(/,\s*]/g, "]").replace(/,\s*}/g, "}");
+    return JSON.parse(cleaned);
+  }
+}
+
+// ─── MAIN HANDLER ─────────────────────────────────────────────────
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
@@ -90,162 +515,85 @@ serve(async (req) => {
     const arrayBuffer = await fileData.arrayBuffer();
     const bytes = new Uint8Array(arrayBuffer);
 
-    if (!lovableApiKey) {
-      await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-      return new Response(JSON.stringify({ error: "LOVABLE_API_KEY not configured" }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // PHASE 1: Extract raw text from PDF using pdfjs (all pages)
+    // PHASE 1: Extract raw text from PDF
     console.log("Phase 1: Extracting text from PDF with pdfjs...");
     let rawText: string;
     try {
       rawText = await extractPdfText(bytes);
-      console.log(`Phase 1 complete: extracted ${rawText.length} chars across all pages`);
+      console.log(`Phase 1 complete: extracted ${rawText.length} chars`);
     } catch (pdfErr) {
-      console.error("PDF text extraction failed, falling back to AI vision:", pdfErr);
-      // Fallback: use AI vision for text extraction
+      console.error("PDF text extraction failed:", pdfErr);
+      if (!lovableApiKey) {
+        await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
+        return new Response(JSON.stringify({ error: "PDF extraction failed and no AI key configured" }), {
+          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      // AI vision fallback for text extraction
       let binary = "";
       const chunkSize = 8192;
       for (let i = 0; i < bytes.length; i += chunkSize) {
         binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
       }
       const base64 = btoa(binary);
-
       const textResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${lovableApiKey}`,
-          "Content-Type": "application/json",
-        },
+        headers: { Authorization: `Bearer ${lovableApiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "google/gemini-2.5-pro",
+          model: "google/gemini-2.5-flash",
           max_tokens: 16384,
           messages: [
-            { role: "system", content: "You are an OCR specialist. Transcribe ALL text from EVERY page of this PDF. Do not skip anything." },
-            {
-              role: "user",
-              content: [
-                { type: "file", file: { filename: "receipt.pdf", file_data: `data:application/pdf;base64,${base64}` } },
-                { type: "text", text: "Transcribe ALL text from EVERY page." },
-              ],
-            },
+            { role: "system", content: "You are an OCR specialist. Transcribe ALL text from EVERY page of this PDF." },
+            { role: "user", content: [
+              { type: "file", file: { filename: "receipt.pdf", file_data: `data:application/pdf;base64,${base64}` } },
+              { type: "text", text: "Transcribe ALL text from EVERY page." },
+            ]},
           ],
         }),
       });
-
       if (!textResponse.ok) {
         await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
         return new Response(JSON.stringify({ error: "Text extraction failed" }), {
           status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-
       const textResult = await textResponse.json();
       rawText = textResult.choices?.[0]?.message?.content || "";
-      console.log(`AI fallback: extracted ${rawText.length} chars`);
+      console.log(`AI OCR fallback: extracted ${rawText.length} chars`);
     }
 
-    // PHASE 2: Parse the raw text into structured data
-    console.log("Phase 2: Parsing text into structured data...");
-    const parseResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${lovableApiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-pro",
-        max_tokens: 16384,
-        messages: [
-          {
-            role: "system",
-            content: `You are a receipt parser for vending machine businesses. Parse the raw receipt text and extract ALL items.
+    // PHASE 2: Parse text — try regex first, then AI fallback
+    console.log("Phase 2: Attempting regex-based parsing...");
+    let parsed: any = parseReceiptText(rawText);
 
-Detect the receipt type:
-- "sams_scan_and_go" if it contains "Scan & Go"
-- "walmart_store" if it's a Walmart in-store receipt
-- "walmart_delivery" if it contains "Order" and delivery info
-
-Walmart receipts: Items appear as product descriptions followed by prices. Look for patterns like "qty @ price/ea" or standalone prices after descriptions. Each product+price = one item.
-
-Sam's Club receipts: Items may appear as single lines with item number, description, qty, and price.
-
-CRITICAL: You MUST extract EVERY item from the text. The text below contains ALL pages of the receipt. Count carefully and do not miss any items.
-
-Compute unit_cost = line_total / (qty * pack_size) if pack size exists, else line_total / qty.
-For normalized names, use format: {Brand/Product} – {Flavor/Variant}`,
-          },
-          {
-            role: "user",
-            content: `Here is the complete raw text extracted from ALL pages of the receipt:\n\n${rawText}\n\nParse ALL items from this text. Extract every single line item.`,
-          },
-        ],
-        tools: [EXTRACT_TOOL],
-        tool_choice: { type: "function", function: { name: "extract_receipt" } },
-      }),
-    });
-
-    if (!parseResponse.ok) {
-      const errText = await parseResponse.text();
-      console.error("Phase 2 AI error:", parseResponse.status, errText);
-      await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-      if (parseResponse.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limited, please try again later" }), {
-          status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (parseResponse.status === 402) {
-        return new Response(JSON.stringify({ error: "AI credits exhausted" }), {
-          status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      return new Response(JSON.stringify({ error: "AI parsing failed" }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const parseResult = await parseResponse.json();
-    const toolCall = parseResult.choices?.[0]?.message?.tool_calls?.[0];
-
-    if (!toolCall) {
-      await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-      return new Response(JSON.stringify({ error: "AI did not return structured data" }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    let parsed: any;
-    try {
-      parsed = JSON.parse(toolCall.function.arguments);
-    } catch (jsonErr) {
-      // Attempt to salvage truncated JSON from LLM
-      let cleaned = toolCall.function.arguments || "";
-      // Remove trailing commas
-      cleaned = cleaned.replace(/,\s*$/g, "");
-      // Remove control characters
-      cleaned = cleaned.replace(/[\x00-\x1F\x7F]/g, "");
-      // Try to close unclosed structures
-      let braces = 0, brackets = 0;
-      for (const ch of cleaned) {
-        if (ch === '{') braces++;
-        if (ch === '}') braces--;
-        if (ch === '[') brackets++;
-        if (ch === ']') brackets--;
-      }
-      // Close any open arrays/objects
-      while (brackets > 0) { cleaned += "]"; brackets--; }
-      while (braces > 0) { cleaned += "}"; braces--; }
-      // Remove trailing commas before closing brackets/braces
-      cleaned = cleaned.replace(/,\s*]/g, "]").replace(/,\s*}/g, "}");
-      try {
-        parsed = JSON.parse(cleaned);
-        console.log("Recovered truncated JSON successfully");
-      } catch (finalErr) {
-        console.error("JSON recovery failed:", finalErr, "Raw:", toolCall.function.arguments?.substring(0, 200));
+    if (parsed && parsed.items.length > 0) {
+      console.log(`Regex parser succeeded: ${parsed.items.length} items found`);
+    } else {
+      console.log("Regex parser found 0 items, falling back to AI...");
+      if (!lovableApiKey) {
         await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-        return new Response(JSON.stringify({ error: "Failed to parse AI response" }), {
+        return new Response(JSON.stringify({ error: "Regex parsing failed and no AI key configured" }), {
+          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      try {
+        parsed = await parseWithAI(rawText, lovableApiKey);
+        console.log(`AI fallback succeeded: ${parsed.items?.length || 0} items`);
+      } catch (aiErr: any) {
+        console.error("AI fallback error:", aiErr.message);
+        await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
+        const msg = aiErr.message || "";
+        if (msg.includes("AI_ERROR:429")) {
+          return new Response(JSON.stringify({ error: "Rate limited, please try again later" }), {
+            status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        if (msg.includes("AI_ERROR:402")) {
+          return new Response(JSON.stringify({ error: "AI credits exhausted" }), {
+            status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        return new Response(JSON.stringify({ error: "Parsing failed" }), {
           status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
@@ -266,14 +614,11 @@ For normalized names, use format: {Brand/Product} – {Flavor/Variant}`,
 
     let extractedItems = parsed.items || [];
     const headerCount = parsed.item_count || extractedItems.length;
-    // header item_count often means total quantity, not unique line items
-    // Compare total qty sum against header count to determine parse status
     const totalQty = extractedItems.reduce((sum: number, item: any) => sum + (item.qty || 1), 0);
-    console.log(`Phase 2 complete: ${extractedItems.length} line items, total qty ${totalQty} (header says ${headerCount})`);
+    console.log(`${extractedItems.length} line items, total qty ${totalQty} (header says ${headerCount})`);
 
-    // Consider parsed if either line count or total qty matches header count
     const parseStatus = (extractedItems.length >= headerCount || totalQty >= headerCount) ? "PARSED" : "PARTIAL_PARSE";
-    console.log(`Final: ${extractedItems.length} lines, qty sum ${totalQty}, status: ${parseStatus}`);
+    console.log(`Final status: ${parseStatus}`);
 
     // Update receipt header
     await supabase.from("receipts").update({
@@ -289,13 +634,12 @@ For normalized names, use format: {Brand/Product} – {Flavor/Variant}`,
       parse_status: parseStatus,
     }).eq("id", receipt_id);
 
-    // Try to match items against user's SKU aliases
+    // Match items against SKU aliases and previously reviewed items
     const { data: aliases } = await supabase
       .from("sku_aliases")
       .select("*, skus!inner(user_id)")
       .eq("skus.user_id", receiptData.user_id);
 
-    // Fetch previously reviewed items for secondary matching
     const { data: reviewedItems } = await supabase
       .from("receipt_items")
       .select("raw_name, sku_id, is_personal, pack_size")
@@ -304,7 +648,6 @@ For normalized names, use format: {Brand/Product} – {Flavor/Variant}`,
       .not("sku_id", "is", null)
       .order("created_at", { ascending: false });
 
-    // Build a map of lowercase raw_name -> most recent reviewed item
     const reviewedMap = new Map<string, { sku_id: string; is_personal: boolean; pack_size: number | null }>();
     if (reviewedItems) {
       for (const ri of reviewedItems) {
@@ -315,7 +658,6 @@ For normalized names, use format: {Brand/Product} – {Flavor/Variant}`,
       }
     }
 
-    // Insert receipt items
     if (extractedItems.length > 0) {
       const itemsToInsert = extractedItems.map((item: any) => {
         let matchedSkuId = null;
@@ -323,7 +665,6 @@ For normalized names, use format: {Brand/Product} – {Flavor/Variant}`,
         let matchedIsPersonal = false;
         let needsReview = true;
 
-        // 1. Check sku_aliases first
         if (aliases) {
           for (const alias of aliases) {
             if (alias.vendor === parsed.vendor) {
@@ -339,7 +680,6 @@ For normalized names, use format: {Brand/Product} – {Flavor/Variant}`,
           }
         }
 
-        // 2. If no alias match, check previously reviewed items
         if (needsReview) {
           const prev = reviewedMap.get(item.raw_name.toLowerCase());
           if (prev) {
