@@ -261,6 +261,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      decrypt_ai_key: {
+        Args: { enc_key: string; encrypted_text: string }
+        Returns: string
+      }
+      encrypt_ai_key: {
+        Args: { enc_key: string; plain_text: string }
+        Returns: string
+      }
       evaluate_test_skus: {
         Args: { p_user_id: string }
         Returns: {
