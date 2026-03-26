@@ -420,21 +420,7 @@ function parseReceiptText(rawText: string): ParsedReceipt | null {
   return null;
 }
 
-// ─── AI FALLBACK (Phase 2 original) ──────────────────────────────
-async function parseWithAI(rawText: string, lovableApiKey: string): Promise<any> {
-  const parseResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${lovableApiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "google/gemini-2.5-flash",
-      max_tokens: 16384,
-      messages: [
-        {
-          role: "system",
-          content: `You are a receipt parser for vending machine businesses. Parse the raw receipt text and extract ALL items.
+const SYSTEM_PROMPT = `You are a receipt parser for vending machine businesses. Parse the raw receipt text and extract ALL items.
 
 Detect the receipt type:
 - "sams_scan_and_go" if it contains "Scan & Go"
@@ -448,31 +434,16 @@ Sam's Club receipts: Items may appear as single lines with item number, descript
 CRITICAL: You MUST extract EVERY item from the text. Count carefully and do not miss any items.
 
 Compute unit_cost = line_total / (qty * pack_size) if pack size exists, else line_total / qty.
-For normalized names, use format: {Brand/Product} – {Flavor/Variant}`,
-        },
-        {
-          role: "user",
-          content: `Here is the complete raw text extracted from ALL pages of the receipt:\n\n${rawText}\n\nParse ALL items from this text. Extract every single line item.`,
-        },
-      ],
-      tools: [EXTRACT_TOOL],
-      tool_choice: { type: "function", function: { name: "extract_receipt" } },
-    }),
-  });
+For normalized names, use format: {Brand/Product} – {Flavor/Variant}`;
 
-  if (!parseResponse.ok) {
-    const errText = await parseResponse.text();
-    throw new Error(`AI_ERROR:${parseResponse.status}:${errText}`);
-  }
+function buildUserPrompt(rawText: string): string {
+  return `Here is the complete raw text extracted from ALL pages of the receipt:\n\n${rawText}\n\nParse ALL items from this text. Extract every single line item.`;
+}
 
-  const parseResult = await parseResponse.json();
-  const toolCall = parseResult.choices?.[0]?.message?.tool_calls?.[0];
-  if (!toolCall) throw new Error("AI did not return structured data");
-
+function parseToolCallResult(toolCall: any): any {
   try {
     return JSON.parse(toolCall.function.arguments);
   } catch {
-    // Attempt to salvage truncated JSON
     let cleaned = toolCall.function.arguments || "";
     cleaned = cleaned.replace(/,\s*$/g, "").replace(/[\x00-\x1F\x7F]/g, "");
     let braces = 0, brackets = 0;
@@ -485,6 +456,140 @@ For normalized names, use format: {Brand/Product} – {Flavor/Variant}`,
     cleaned = cleaned.replace(/,\s*]/g, "]").replace(/,\s*}/g, "}");
     return JSON.parse(cleaned);
   }
+}
+
+// ─── AI PARSING WITH USER'S PROVIDER ─────────────────────────────
+async function parseWithUserProvider(
+  rawText: string,
+  provider: string,
+  apiKey: string,
+  model: string
+): Promise<any> {
+  if (provider === "anthropic") {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 16384,
+        system: SYSTEM_PROMPT,
+        tools: [{
+          name: "extract_receipt",
+          description: EXTRACT_TOOL.function.description,
+          input_schema: EXTRACT_TOOL.function.parameters,
+        }],
+        tool_choice: { type: "tool", name: "extract_receipt" },
+        messages: [{ role: "user", content: buildUserPrompt(rawText) }],
+      }),
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`AI_ERROR:${res.status}:${t}`);
+    }
+    const result = await res.json();
+    const toolUse = result.content?.find((c: any) => c.type === "tool_use");
+    if (!toolUse) throw new Error("AI did not return structured data");
+    return toolUse.input;
+  }
+
+  if (provider === "openai") {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 16384,
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: buildUserPrompt(rawText) },
+        ],
+        tools: [EXTRACT_TOOL],
+        tool_choice: { type: "function", function: { name: "extract_receipt" } },
+      }),
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`AI_ERROR:${res.status}:${t}`);
+    }
+    const result = await res.json();
+    const toolCall = result.choices?.[0]?.message?.tool_calls?.[0];
+    if (!toolCall) throw new Error("AI did not return structured data");
+    return parseToolCallResult(toolCall);
+  }
+
+  if (provider === "google") {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+          contents: [{ parts: [{ text: buildUserPrompt(rawText) }] }],
+          tools: [{
+            functionDeclarations: [{
+              name: "extract_receipt",
+              description: EXTRACT_TOOL.function.description,
+              parameters: EXTRACT_TOOL.function.parameters,
+            }],
+          }],
+          toolConfig: { functionCallingConfig: { mode: "ANY", allowedFunctionNames: ["extract_receipt"] } },
+          generationConfig: { maxOutputTokens: 16384 },
+        }),
+      }
+    );
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`AI_ERROR:${res.status}:${t}`);
+    }
+    const result = await res.json();
+    const fc = result.candidates?.[0]?.content?.parts?.find((p: any) => p.functionCall);
+    if (!fc) throw new Error("AI did not return structured data");
+    return fc.functionCall.args;
+  }
+
+  throw new Error(`Unknown provider: ${provider}`);
+}
+
+// Get user's configured AI provider
+async function getUserAIConfig(supabase: any, userId: string, encryptionKey: string) {
+  const { data, error } = await supabase
+    .from("ai_provider_settings")
+    .select("provider, encrypted_api_key, model, is_default")
+    .eq("user_id", userId)
+    .eq("is_default", true)
+    .single();
+
+  if (error || !data) {
+    // Try any provider if no default
+    const { data: any_provider } = await supabase
+      .from("ai_provider_settings")
+      .select("provider, encrypted_api_key, model")
+      .eq("user_id", userId)
+      .limit(1)
+      .single();
+    if (!any_provider) return null;
+
+    // Decrypt key
+    const { data: decrypted } = await supabase.rpc("decrypt_ai_key", {
+      encrypted_text: any_provider.encrypted_api_key,
+      enc_key: encryptionKey,
+    });
+    return { provider: any_provider.provider, apiKey: decrypted, model: any_provider.model };
+  }
+
+  const { data: decrypted } = await supabase.rpc("decrypt_ai_key", {
+    encrypted_text: data.encrypted_api_key,
+    enc_key: encryptionKey,
+  });
+  return { provider: data.provider, apiKey: decrypted, model: data.model };
 }
 
 // ─── MAIN HANDLER ─────────────────────────────────────────────────
