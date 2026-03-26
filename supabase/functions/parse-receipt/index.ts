@@ -420,21 +420,7 @@ function parseReceiptText(rawText: string): ParsedReceipt | null {
   return null;
 }
 
-// ─── AI FALLBACK (Phase 2 original) ──────────────────────────────
-async function parseWithAI(rawText: string, lovableApiKey: string): Promise<any> {
-  const parseResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${lovableApiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "google/gemini-2.5-flash",
-      max_tokens: 16384,
-      messages: [
-        {
-          role: "system",
-          content: `You are a receipt parser for vending machine businesses. Parse the raw receipt text and extract ALL items.
+const SYSTEM_PROMPT = `You are a receipt parser for vending machine businesses. Parse the raw receipt text and extract ALL items.
 
 Detect the receipt type:
 - "sams_scan_and_go" if it contains "Scan & Go"
@@ -448,31 +434,16 @@ Sam's Club receipts: Items may appear as single lines with item number, descript
 CRITICAL: You MUST extract EVERY item from the text. Count carefully and do not miss any items.
 
 Compute unit_cost = line_total / (qty * pack_size) if pack size exists, else line_total / qty.
-For normalized names, use format: {Brand/Product} – {Flavor/Variant}`,
-        },
-        {
-          role: "user",
-          content: `Here is the complete raw text extracted from ALL pages of the receipt:\n\n${rawText}\n\nParse ALL items from this text. Extract every single line item.`,
-        },
-      ],
-      tools: [EXTRACT_TOOL],
-      tool_choice: { type: "function", function: { name: "extract_receipt" } },
-    }),
-  });
+For normalized names, use format: {Brand/Product} – {Flavor/Variant}`;
 
-  if (!parseResponse.ok) {
-    const errText = await parseResponse.text();
-    throw new Error(`AI_ERROR:${parseResponse.status}:${errText}`);
-  }
+function buildUserPrompt(rawText: string): string {
+  return `Here is the complete raw text extracted from ALL pages of the receipt:\n\n${rawText}\n\nParse ALL items from this text. Extract every single line item.`;
+}
 
-  const parseResult = await parseResponse.json();
-  const toolCall = parseResult.choices?.[0]?.message?.tool_calls?.[0];
-  if (!toolCall) throw new Error("AI did not return structured data");
-
+function parseToolCallResult(toolCall: any): any {
   try {
     return JSON.parse(toolCall.function.arguments);
   } catch {
-    // Attempt to salvage truncated JSON
     let cleaned = toolCall.function.arguments || "";
     cleaned = cleaned.replace(/,\s*$/g, "").replace(/[\x00-\x1F\x7F]/g, "");
     let braces = 0, brackets = 0;
@@ -487,6 +458,140 @@ For normalized names, use format: {Brand/Product} – {Flavor/Variant}`,
   }
 }
 
+// ─── AI PARSING WITH USER'S PROVIDER ─────────────────────────────
+async function parseWithUserProvider(
+  rawText: string,
+  provider: string,
+  apiKey: string,
+  model: string
+): Promise<any> {
+  if (provider === "anthropic") {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 16384,
+        system: SYSTEM_PROMPT,
+        tools: [{
+          name: "extract_receipt",
+          description: EXTRACT_TOOL.function.description,
+          input_schema: EXTRACT_TOOL.function.parameters,
+        }],
+        tool_choice: { type: "tool", name: "extract_receipt" },
+        messages: [{ role: "user", content: buildUserPrompt(rawText) }],
+      }),
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`AI_ERROR:${res.status}:${t}`);
+    }
+    const result = await res.json();
+    const toolUse = result.content?.find((c: any) => c.type === "tool_use");
+    if (!toolUse) throw new Error("AI did not return structured data");
+    return toolUse.input;
+  }
+
+  if (provider === "openai") {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 16384,
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: buildUserPrompt(rawText) },
+        ],
+        tools: [EXTRACT_TOOL],
+        tool_choice: { type: "function", function: { name: "extract_receipt" } },
+      }),
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`AI_ERROR:${res.status}:${t}`);
+    }
+    const result = await res.json();
+    const toolCall = result.choices?.[0]?.message?.tool_calls?.[0];
+    if (!toolCall) throw new Error("AI did not return structured data");
+    return parseToolCallResult(toolCall);
+  }
+
+  if (provider === "google") {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+          contents: [{ parts: [{ text: buildUserPrompt(rawText) }] }],
+          tools: [{
+            functionDeclarations: [{
+              name: "extract_receipt",
+              description: EXTRACT_TOOL.function.description,
+              parameters: EXTRACT_TOOL.function.parameters,
+            }],
+          }],
+          toolConfig: { functionCallingConfig: { mode: "ANY", allowedFunctionNames: ["extract_receipt"] } },
+          generationConfig: { maxOutputTokens: 16384 },
+        }),
+      }
+    );
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`AI_ERROR:${res.status}:${t}`);
+    }
+    const result = await res.json();
+    const fc = result.candidates?.[0]?.content?.parts?.find((p: any) => p.functionCall);
+    if (!fc) throw new Error("AI did not return structured data");
+    return fc.functionCall.args;
+  }
+
+  throw new Error(`Unknown provider: ${provider}`);
+}
+
+// Get user's configured AI provider
+async function getUserAIConfig(supabase: any, userId: string, encryptionKey: string) {
+  const { data, error } = await supabase
+    .from("ai_provider_settings")
+    .select("provider, encrypted_api_key, model, is_default")
+    .eq("user_id", userId)
+    .eq("is_default", true)
+    .single();
+
+  if (error || !data) {
+    // Try any provider if no default
+    const { data: any_provider } = await supabase
+      .from("ai_provider_settings")
+      .select("provider, encrypted_api_key, model")
+      .eq("user_id", userId)
+      .limit(1)
+      .single();
+    if (!any_provider) return null;
+
+    // Decrypt key
+    const { data: decrypted } = await supabase.rpc("decrypt_ai_key", {
+      encrypted_text: any_provider.encrypted_api_key,
+      enc_key: encryptionKey,
+    });
+    return { provider: any_provider.provider, apiKey: decrypted, model: any_provider.model };
+  }
+
+  const { data: decrypted } = await supabase.rpc("decrypt_ai_key", {
+    encrypted_text: data.encrypted_api_key,
+    enc_key: encryptionKey,
+  });
+  return { provider: data.provider, apiKey: decrypted, model: data.model };
+}
+
 // ─── MAIN HANDLER ─────────────────────────────────────────────────
 serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
@@ -496,7 +601,7 @@ serve(async (req) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const lovableApiKey = Deno.env.get("LOVABLE_API_KEY");
+    const encryptionKey = Deno.env.get("AI_ENCRYPTION_KEY") || "";
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Download the PDF
@@ -523,46 +628,15 @@ serve(async (req) => {
       console.log(`Phase 1 complete: extracted ${rawText.length} chars`);
     } catch (pdfErr) {
       console.error("PDF text extraction failed:", pdfErr);
-      if (!lovableApiKey) {
-        await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-        return new Response(JSON.stringify({ error: "PDF extraction failed and no AI key configured" }), {
-          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      // AI vision fallback for text extraction
-      let binary = "";
-      const chunkSize = 8192;
-      for (let i = 0; i < bytes.length; i += chunkSize) {
-        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-      }
-      const base64 = btoa(binary);
-      const textResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${lovableApiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "google/gemini-2.5-flash",
-          max_tokens: 16384,
-          messages: [
-            { role: "system", content: "You are an OCR specialist. Transcribe ALL text from EVERY page of this PDF." },
-            { role: "user", content: [
-              { type: "file", file: { filename: "receipt.pdf", file_data: `data:application/pdf;base64,${base64}` } },
-              { type: "text", text: "Transcribe ALL text from EVERY page." },
-            ]},
-          ],
-        }),
+      // If pdfjs fails, we can't do vision OCR without complex provider-specific logic
+      // Just fail — pdfjs should handle most PDFs
+      await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
+      return new Response(JSON.stringify({ error: "PDF text extraction failed. Please ensure the file is a valid PDF." }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
-      if (!textResponse.ok) {
-        await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-        return new Response(JSON.stringify({ error: "Text extraction failed" }), {
-          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      const textResult = await textResponse.json();
-      rawText = textResult.choices?.[0]?.message?.content || "";
-      console.log(`AI OCR fallback: extracted ${rawText.length} chars`);
     }
 
-    // PHASE 2: Parse text — try regex first, then AI fallback
+    // PHASE 2: Parse text — try regex first, then user's AI provider
     console.log("Phase 2: Attempting regex-based parsing...");
     let parsed: any = parseReceiptText(rawText);
 
@@ -570,30 +644,46 @@ serve(async (req) => {
       console.log(`Regex parser succeeded: ${parsed.items.length} items found`);
     } else {
       console.log("Regex parser found 0 items, falling back to AI...");
-      if (!lovableApiKey) {
-        await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-        return new Response(JSON.stringify({ error: "Regex parsing failed and no AI key configured" }), {
-          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+
+      // Get receipt user_id first for AI config lookup
+      const { data: receiptForAI } = await supabase
+        .from("receipts")
+        .select("user_id")
+        .eq("id", receipt_id)
+        .single();
+
+      if (!receiptForAI) {
+        return new Response(JSON.stringify({ error: "Receipt not found" }), {
+          status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+
+      const aiConfig = await getUserAIConfig(supabase, receiptForAI.user_id, encryptionKey);
+      if (!aiConfig) {
+        await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
+        return new Response(JSON.stringify({ error: "No AI provider configured. Please set up an AI provider in Settings → AI Settings." }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
       try {
-        parsed = await parseWithAI(rawText, lovableApiKey);
-        console.log(`AI fallback succeeded: ${parsed.items?.length || 0} items`);
+        parsed = await parseWithUserProvider(rawText, aiConfig.provider, aiConfig.apiKey, aiConfig.model);
+        console.log(`AI (${aiConfig.provider}/${aiConfig.model}) succeeded: ${parsed.items?.length || 0} items`);
       } catch (aiErr: any) {
-        console.error("AI fallback error:", aiErr.message);
+        console.error("AI error:", aiErr.message);
         await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
         const msg = aiErr.message || "";
         if (msg.includes("AI_ERROR:429")) {
-          return new Response(JSON.stringify({ error: "Rate limited, please try again later" }), {
+          return new Response(JSON.stringify({ error: `Rate limited by ${aiConfig.provider}. Please try again later.` }), {
             status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
-        if (msg.includes("AI_ERROR:402")) {
-          return new Response(JSON.stringify({ error: "AI credits exhausted" }), {
-            status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        if (msg.includes("AI_ERROR:401") || msg.includes("AI_ERROR:403")) {
+          return new Response(JSON.stringify({ error: `Invalid or expired ${aiConfig.provider} API key. Please check your key in Settings → AI Settings.` }), {
+            status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
-        return new Response(JSON.stringify({ error: "Parsing failed" }), {
+        return new Response(JSON.stringify({ error: `Parsing failed with ${aiConfig.provider}. Check your API key in Settings.` }), {
           status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
