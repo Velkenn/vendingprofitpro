@@ -17,63 +17,30 @@ async function testProviderKey(provider: string, apiKey: string, model: string):
     if (provider === "anthropic") {
       const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
-        headers: {
-          "x-api-key": apiKey,
-          "anthropic-version": "2023-06-01",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: 10,
-          messages: [{ role: "user", content: "Hi" }],
-        }),
+        headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+        body: JSON.stringify({ model, max_tokens: 10, messages: [{ role: "user", content: "Hi" }] }),
       });
-      if (!res.ok) {
-        const t = await res.text();
-        return { ok: false, error: `Anthropic error ${res.status}: ${t}` };
-      }
+      if (!res.ok) { const t = await res.text(); return { ok: false, error: `Anthropic ${res.status}: ${t.slice(0, 200)}` }; }
       return { ok: true };
     }
-
     if (provider === "openai") {
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: 10,
-          messages: [{ role: "user", content: "Hi" }],
-        }),
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ model, max_tokens: 10, messages: [{ role: "user", content: "Hi" }] }),
       });
-      if (!res.ok) {
-        const t = await res.text();
-        return { ok: false, error: `OpenAI error ${res.status}: ${t}` };
-      }
+      if (!res.ok) { const t = await res.text(); return { ok: false, error: `OpenAI ${res.status}: ${t.slice(0, 200)}` }; }
       return { ok: true };
     }
-
     if (provider === "google") {
-      const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: "Hi" }] }],
-            generationConfig: { maxOutputTokens: 10 },
-          }),
-        }
-      );
-      if (!res.ok) {
-        const t = await res.text();
-        return { ok: false, error: `Google error ${res.status}: ${t}` };
-      }
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contents: [{ parts: [{ text: "Hi" }] }], generationConfig: { maxOutputTokens: 10 } }),
+      });
+      if (!res.ok) { const t = await res.text(); return { ok: false, error: `Google ${res.status}: ${t.slice(0, 200)}` }; }
       return { ok: true };
     }
-
     return { ok: false, error: "Unknown provider" };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Connection failed" };
@@ -89,7 +56,6 @@ serve(async (req) => {
     const encryptionKey = Deno.env.get("AI_ENCRYPTION_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Auth: get user from JWT
     const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
@@ -107,13 +73,12 @@ serve(async (req) => {
     const url = new URL(req.url);
     const action = url.searchParams.get("action");
 
-    // LIST
+    // LIST — returns connected status per provider (never the key)
     if (action === "list") {
       const { data, error } = await supabase
         .from("ai_provider_settings")
         .select("provider, model, is_default, created_at")
         .eq("user_id", user.id);
-
       if (error) throw error;
       return new Response(JSON.stringify({ providers: data || [] }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -122,7 +87,7 @@ serve(async (req) => {
 
     const body = await req.json();
 
-    // SAVE
+    // SAVE — encrypt key and upsert
     if (action === "save") {
       const { provider, api_key, model, is_default } = body;
       if (!provider || !api_key || !model) {
@@ -136,72 +101,35 @@ serve(async (req) => {
         });
       }
 
-      // If setting as default, unset others
-      if (is_default) {
-        await supabase
-          .from("ai_provider_settings")
-          .update({ is_default: false })
-          .eq("user_id", user.id)
-          .neq("provider", provider);
-      }
-
-      // Encrypt the key using pgcrypto
-      const { data: encrypted, error: encErr } = await supabase.rpc("encrypt_text", {
+      // Encrypt the API key
+      const { data: encryptedKey, error: encErr } = await supabase.rpc("encrypt_ai_key", {
         plain_text: api_key,
         encryption_key: encryptionKey,
       });
+      if (encErr) throw encErr;
 
-      // If rpc doesn't exist, use raw SQL via service role
-      let encryptedKey: string;
-      if (encErr) {
-        // Direct SQL approach
-        const { data: sqlResult, error: sqlErr } = await supabase
-          .from("ai_provider_settings")
-          .upsert({
-            user_id: user.id,
-            provider,
-            encrypted_api_key: api_key, // temporarily store, we'll encrypt below
-            model,
-            is_default: is_default || false,
-          }, { onConflict: "user_id,provider" })
-          .select("id")
-          .single();
-
-        if (sqlErr) throw sqlErr;
-
-        // Now encrypt in place using raw query via REST
-        const encryptQuery = await fetch(
-          `${supabaseUrl}/rest/v1/rpc/execute_encrypt`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${supabaseKey}`,
-              "Content-Type": "application/json",
-              apikey: supabaseKey,
-            },
-            body: JSON.stringify({ setting_id: sqlResult.id, plain_key: api_key, enc_key: encryptionKey }),
-          }
-        );
-        // If that fails too, we'll handle it in migration
-      } else {
-        encryptedKey = encrypted;
-        await supabase
-          .from("ai_provider_settings")
-          .upsert({
-            user_id: user.id,
-            provider,
-            encrypted_api_key: encryptedKey,
-            model,
-            is_default: is_default || false,
-          }, { onConflict: "user_id,provider" });
+      // If setting as default, unset others
+      if (is_default) {
+        await supabase.from("ai_provider_settings").update({ is_default: false }).eq("user_id", user.id);
       }
+
+      const { error: upsertErr } = await supabase
+        .from("ai_provider_settings")
+        .upsert({
+          user_id: user.id,
+          provider,
+          encrypted_api_key: encryptedKey,
+          model,
+          is_default: is_default || false,
+        }, { onConflict: "user_id,provider" });
+      if (upsertErr) throw upsertErr;
 
       return new Response(JSON.stringify({ success: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // TEST
+    // TEST — test the key without saving
     if (action === "test") {
       const { provider, api_key, model } = body;
       if (!provider || !api_key || !model) {
@@ -223,12 +151,7 @@ serve(async (req) => {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      await supabase
-        .from("ai_provider_settings")
-        .delete()
-        .eq("user_id", user.id)
-        .eq("provider", provider);
-
+      await supabase.from("ai_provider_settings").delete().eq("user_id", user.id).eq("provider", provider);
       return new Response(JSON.stringify({ success: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -242,18 +165,8 @@ serve(async (req) => {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-      // Unset all defaults
-      await supabase
-        .from("ai_provider_settings")
-        .update({ is_default: false })
-        .eq("user_id", user.id);
-      // Set new default
-      await supabase
-        .from("ai_provider_settings")
-        .update({ is_default: true })
-        .eq("user_id", user.id)
-        .eq("provider", provider);
-
+      await supabase.from("ai_provider_settings").update({ is_default: false }).eq("user_id", user.id);
+      await supabase.from("ai_provider_settings").update({ is_default: true }).eq("user_id", user.id).eq("provider", provider);
       return new Response(JSON.stringify({ success: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
