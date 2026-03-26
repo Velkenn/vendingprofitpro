@@ -628,46 +628,15 @@ serve(async (req) => {
       console.log(`Phase 1 complete: extracted ${rawText.length} chars`);
     } catch (pdfErr) {
       console.error("PDF text extraction failed:", pdfErr);
-      if (!lovableApiKey) {
-        await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-        return new Response(JSON.stringify({ error: "PDF extraction failed and no AI key configured" }), {
-          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      // AI vision fallback for text extraction
-      let binary = "";
-      const chunkSize = 8192;
-      for (let i = 0; i < bytes.length; i += chunkSize) {
-        binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-      }
-      const base64 = btoa(binary);
-      const textResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${lovableApiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "google/gemini-2.5-flash",
-          max_tokens: 16384,
-          messages: [
-            { role: "system", content: "You are an OCR specialist. Transcribe ALL text from EVERY page of this PDF." },
-            { role: "user", content: [
-              { type: "file", file: { filename: "receipt.pdf", file_data: `data:application/pdf;base64,${base64}` } },
-              { type: "text", text: "Transcribe ALL text from EVERY page." },
-            ]},
-          ],
-        }),
+      // If pdfjs fails, we can't do vision OCR without complex provider-specific logic
+      // Just fail — pdfjs should handle most PDFs
+      await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
+      return new Response(JSON.stringify({ error: "PDF text extraction failed. Please ensure the file is a valid PDF." }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
-      if (!textResponse.ok) {
-        await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-        return new Response(JSON.stringify({ error: "Text extraction failed" }), {
-          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      const textResult = await textResponse.json();
-      rawText = textResult.choices?.[0]?.message?.content || "";
-      console.log(`AI OCR fallback: extracted ${rawText.length} chars`);
     }
 
-    // PHASE 2: Parse text — try regex first, then AI fallback
+    // PHASE 2: Parse text — try regex first, then user's AI provider
     console.log("Phase 2: Attempting regex-based parsing...");
     let parsed: any = parseReceiptText(rawText);
 
@@ -675,30 +644,46 @@ serve(async (req) => {
       console.log(`Regex parser succeeded: ${parsed.items.length} items found`);
     } else {
       console.log("Regex parser found 0 items, falling back to AI...");
-      if (!lovableApiKey) {
-        await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-        return new Response(JSON.stringify({ error: "Regex parsing failed and no AI key configured" }), {
-          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+
+      // Get receipt user_id first for AI config lookup
+      const { data: receiptForAI } = await supabase
+        .from("receipts")
+        .select("user_id")
+        .eq("id", receipt_id)
+        .single();
+
+      if (!receiptForAI) {
+        return new Response(JSON.stringify({ error: "Receipt not found" }), {
+          status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
+
+      const aiConfig = await getUserAIConfig(supabase, receiptForAI.user_id, encryptionKey);
+      if (!aiConfig) {
+        await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
+        return new Response(JSON.stringify({ error: "No AI provider configured. Please set up an AI provider in Settings → AI Settings." }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
       try {
-        parsed = await parseWithAI(rawText, lovableApiKey);
-        console.log(`AI fallback succeeded: ${parsed.items?.length || 0} items`);
+        parsed = await parseWithUserProvider(rawText, aiConfig.provider, aiConfig.apiKey, aiConfig.model);
+        console.log(`AI (${aiConfig.provider}/${aiConfig.model}) succeeded: ${parsed.items?.length || 0} items`);
       } catch (aiErr: any) {
-        console.error("AI fallback error:", aiErr.message);
+        console.error("AI error:", aiErr.message);
         await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
         const msg = aiErr.message || "";
         if (msg.includes("AI_ERROR:429")) {
-          return new Response(JSON.stringify({ error: "Rate limited, please try again later" }), {
+          return new Response(JSON.stringify({ error: `Rate limited by ${aiConfig.provider}. Please try again later.` }), {
             status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
-        if (msg.includes("AI_ERROR:402")) {
-          return new Response(JSON.stringify({ error: "AI credits exhausted" }), {
-            status: 402, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        if (msg.includes("AI_ERROR:401") || msg.includes("AI_ERROR:403")) {
+          return new Response(JSON.stringify({ error: `Invalid or expired ${aiConfig.provider} API key. Please check your key in Settings → AI Settings.` }), {
+            status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
-        return new Response(JSON.stringify({ error: "Parsing failed" }), {
+        return new Response(JSON.stringify({ error: `Parsing failed with ${aiConfig.provider}. Check your API key in Settings.` }), {
           status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
