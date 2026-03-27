@@ -130,12 +130,43 @@ export default function Receipts() {
     }
   };
 
+  const startProgressAnimation = useCallback(() => {
+    setParseProgress(0);
+    setParseLabel("Uploading complete");
+    const startTime = Date.now();
+    progressRef.current = setInterval(() => {
+      const elapsed = (Date.now() - startTime) / 1000;
+      let progress: number;
+      let label: string;
+      if (elapsed < 3) {
+        progress = (elapsed / 3) * 30;
+        label = "Uploading complete";
+      } else if (elapsed < 8) {
+        progress = 30 + ((elapsed - 3) / 5) * 30;
+        label = "Extracting text...";
+      } else if (elapsed < 18) {
+        progress = 60 + ((elapsed - 8) / 10) * 25;
+        label = "Analyzing items...";
+      } else if (elapsed < 33) {
+        progress = 85 + ((elapsed - 18) / 15) * 10;
+        label = "Almost done...";
+      } else {
+        progress = 95;
+        label = "Almost done...";
+      }
+      setParseProgress(Math.min(progress, 95));
+      setParseLabel(label);
+    }, 200);
+  }, []);
+
   const handleUploadReset = () => {
     stopPolling();
     setFile(null);
     setUploadReceipt(null);
     setUploadState("idle");
     setErrorMsg("");
+    setParseProgress(0);
+    setParseLabel("");
     setUploadExpanded(false);
   };
 
