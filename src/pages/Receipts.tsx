@@ -74,8 +74,10 @@ export default function Receipts() {
           setUploadState("error");
           setErrorMsg("Could not read this receipt. Try a clearer scan.");
         } else {
+          setParseProgress(100);
+          setParseLabel("Complete!");
           setUploadState("done");
-          loadReceipts(); // Refresh the receipts list
+          loadReceipts();
         }
       }
     }, 2000);
