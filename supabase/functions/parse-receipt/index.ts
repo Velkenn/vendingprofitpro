@@ -38,12 +38,10 @@ const EXTRACT_TOOL = {
               unit_cost: { type: "number" },
             },
             required: ["raw_name", "qty", "line_total"],
-            additionalProperties: false,
           },
         },
       },
       required: ["receipt_type", "vendor", "receipt_date", "items"],
-      additionalProperties: false,
     },
   },
 };

@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Receipt, Plus, Upload as UploadIcon, FileText, Loader2, CheckCircle, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
 import { format } from "date-fns";
@@ -27,12 +28,19 @@ export default function Receipts() {
   const [uploadState, setUploadState] = useState<UploadState>("idle");
   const [uploadReceipt, setUploadReceipt] = useState<Tables<"receipts"> | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
+  const [parseProgress, setParseProgress] = useState(0);
+  const [parseLabel, setParseLabel] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const progressRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
       clearInterval(pollRef.current);
       pollRef.current = null;
+    }
+    if (progressRef.current) {
+      clearInterval(progressRef.current);
+      progressRef.current = null;
     }
   }, []);
 
@@ -66,8 +74,10 @@ export default function Receipts() {
           setUploadState("error");
           setErrorMsg("Could not read this receipt. Try a clearer scan.");
         } else {
+          setParseProgress(100);
+          setParseLabel("Complete!");
           setUploadState("done");
-          loadReceipts(); // Refresh the receipts list
+          loadReceipts();
         }
       }
     }, 2000);
@@ -107,6 +117,7 @@ export default function Receipts() {
       if (dbError) throw dbError;
 
       setUploadReceipt(newReceipt);
+      startProgressAnimation();
       setUploadState("parsing");
 
       // Fire and forget — we poll for completion
@@ -121,12 +132,43 @@ export default function Receipts() {
     }
   };
 
+  const startProgressAnimation = useCallback(() => {
+    setParseProgress(0);
+    setParseLabel("Uploading complete");
+    const startTime = Date.now();
+    progressRef.current = setInterval(() => {
+      const elapsed = (Date.now() - startTime) / 1000;
+      let progress: number;
+      let label: string;
+      if (elapsed < 3) {
+        progress = (elapsed / 3) * 30;
+        label = "Uploading complete";
+      } else if (elapsed < 8) {
+        progress = 30 + ((elapsed - 3) / 5) * 30;
+        label = "Extracting text...";
+      } else if (elapsed < 18) {
+        progress = 60 + ((elapsed - 8) / 10) * 25;
+        label = "Analyzing items...";
+      } else if (elapsed < 33) {
+        progress = 85 + ((elapsed - 18) / 15) * 10;
+        label = "Almost done...";
+      } else {
+        progress = 95;
+        label = "Almost done...";
+      }
+      setParseProgress(Math.min(progress, 95));
+      setParseLabel(label);
+    }, 200);
+  }, []);
+
   const handleUploadReset = () => {
     stopPolling();
     setFile(null);
     setUploadReceipt(null);
     setUploadState("idle");
     setErrorMsg("");
+    setParseProgress(0);
+    setParseLabel("");
     setUploadExpanded(false);
   };
 
@@ -187,12 +229,12 @@ export default function Receipts() {
             )}
 
             {uploadState === "parsing" && (
-              <div className="flex items-center gap-3">
-                <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                <div>
-                  <p className="font-medium text-sm">Analyzing your receipt...</p>
-                  <p className="text-xs text-muted-foreground">This usually takes 10–20 seconds</p>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="font-medium text-sm">{parseLabel}</p>
+                  <span className="text-xs text-muted-foreground">{Math.round(parseProgress)}%</span>
                 </div>
+                <Progress value={parseProgress} className="h-2" />
               </div>
             )}
 
