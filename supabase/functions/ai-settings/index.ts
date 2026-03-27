@@ -104,7 +104,7 @@ serve(async (req) => {
       // Encrypt the API key
       const { data: encryptedKey, error: encErr } = await supabase.rpc("encrypt_ai_key", {
         plain_text: api_key,
-        encryption_key: encryptionKey,
+        enc_key: encryptionKey,
       });
       if (encErr) throw encErr;
 
