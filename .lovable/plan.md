@@ -1,89 +1,35 @@
 
 
-## Add User-Managed AI Keys for Receipt Parsing
+## Fix AI Parsing and Add Progress Bar
 
-### Overview
-Add an "AI Settings" section to the Settings page where users can configure their own API keys for Anthropic, OpenAI, or Google Gemini. The parse-receipt edge function will use the user's chosen provider/model instead of the Lovable AI gateway.
+### Problems identified
 
-### Database Changes
+1. **Google Gemini API rejects the tool schema** — The edge function logs show: `Unknown name "additionalProperties"`. Google's function calling API doesn't support `additionalProperties` in the schema. Lines 41 and 46 of `parse-receipt/index.ts` include `additionalProperties: false` which breaks Google. The same schema is passed to Anthropic via `input_schema` (line 483) — Anthropic also doesn't use this field.
 
-**New table: `ai_provider_settings`**
-```sql
-CREATE TABLE public.ai_provider_settings (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL,
-  provider text NOT NULL CHECK (provider IN ('anthropic', 'openai', 'google')),
-  encrypted_api_key text NOT NULL,
-  model text NOT NULL,
-  is_default boolean NOT NULL DEFAULT false,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (user_id, provider)
-);
+2. **No progress bar during parsing** — The upload UI just shows a spinner with "This usually takes 10-20 seconds".
 
-ALTER TABLE public.ai_provider_settings ENABLE ROW LEVEL SECURITY;
--- RLS: users can only CRUD their own rows
-```
+### Changes
 
-API keys will be stored encrypted using `pgcrypto` with a server-side encryption key stored as a Supabase secret.
+**File: `supabase/functions/parse-receipt/index.ts`**
 
-### New Edge Function: `ai-settings`
+- Remove `additionalProperties: false` from both the item schema (line 41) and the top-level parameters (line 46) in `EXTRACT_TOOL`. This fixes the Google 400 error. OpenAI tolerates its absence, and Anthropic doesn't use it either.
+- For the Google provider call (line 537-541), strip `additionalProperties` from a cloned schema before sending, as a safety net.
 
-Handles:
-- **POST /save** — Encrypts and stores the API key server-side, never returning the raw key
-- **POST /test** — Tests the key by sending a simple completion request to the provider's API
-- **GET /list** — Returns provider, model, is_default, and connected status (but NOT the key)
-- **POST /delete** — Removes a provider's key
+**File: `src/pages/Receipts.tsx`**
 
-### Edge Function Changes: `parse-receipt`
+Replace the "parsing" state UI (lines 189-197) with an animated progress bar:
+- Add state: `parseProgress` number (0-100)
+- When entering "parsing" state, start a simulated progress animation:
+  - 0→30% fast (first 3s) — "Uploading complete"
+  - 30→60% medium (next 5s) — "Extracting text..."  
+  - 60→85% slow (next 10s) — "Analyzing items..."
+  - 85→95% very slow (next 15s) — "Almost done..."
+  - Stays at 95% until polling resolves
+- When state changes to "done", jump to 100%
+- Use the existing `Progress` component from `@/components/ui/progress`
+- Show the current step label below the progress bar
 
-Update Phase 2 fallback logic:
-1. Query `ai_provider_settings` for the user's default provider
-2. If found, use that provider's API directly (Anthropic, OpenAI, or Google) with the decrypted key
-3. If no user key configured, return an error telling the user to configure an AI provider in Settings
-4. Remove the Lovable AI gateway dependency entirely
-
-Provider-specific API calls:
-- **Anthropic**: `https://api.anthropic.com/v1/messages` with `x-api-key` header, tool use for structured output
-- **OpenAI**: `https://api.openai.com/v1/chat/completions` with Bearer auth, function calling
-- **Google**: `https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent` with API key param
-
-### Frontend Changes
-
-**File: `src/pages/SettingsPage.tsx`**
-- Add an "AI Settings" card with a button that opens a dialog/modal
-
-**New file: `src/components/settings/AISettingsDialog.tsx`**
-- Dialog showing three provider cards (Anthropic/Claude, OpenAI/ChatGPT, Google/Gemini)
-- Each card has:
-  - Brand color accent (Anthropic: orange-brown, OpenAI: green/black, Google: blue)
-  - Password-masked API key input
-  - Model selector dropdown:
-    - Claude: claude-opus-4, claude-sonnet-4
-    - OpenAI: gpt-4o, gpt-4-turbo  
-    - Google: gemini-2.5-pro, gemini-2.5-flash
-  - "Test Connection" button that calls the edge function test endpoint
-  - "Connect" / "Disconnect" button
-  - Green "Connected" badge when saved
-  - "Set as Default" radio/toggle — only one provider can be default
-  - Inline error display for invalid keys
-
-### Security
-- API keys are encrypted at rest using `pgp_sym_encrypt` with a secret stored in Supabase secrets
-- Keys are never sent back to the client — only a "connected" boolean
-- Decryption only happens server-side in edge functions
-- RLS ensures users only access their own settings
-
-### Error Handling
-- Invalid/expired key: inline error on the provider card after test fails
-- Parsing failure: toast showing which provider failed with suggestion to check the key
-- No provider configured: prompt user to set up AI in Settings before parsing
-
-### Implementation Order
-1. Add encryption secret via `add_secret`
-2. Create `ai_provider_settings` table migration
-3. Create `ai-settings` edge function
-4. Update `parse-receipt` to use user's provider
-5. Build `AISettingsDialog` component
-6. Add AI Settings button to SettingsPage
+### Result
+- Google/Anthropic/OpenAI parsing will all work without schema errors
+- Users see a smooth progress bar instead of a static "10-20 seconds" message
 
