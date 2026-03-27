@@ -38,7 +38,6 @@ const EXTRACT_TOOL = {
               unit_cost: { type: "number" },
             },
             required: ["raw_name", "qty", "line_total"],
-            additionalProperties: false,
           },
         },
       },
