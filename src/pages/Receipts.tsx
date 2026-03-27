@@ -227,12 +227,12 @@ export default function Receipts() {
             )}
 
             {uploadState === "parsing" && (
-              <div className="flex items-center gap-3">
-                <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                <div>
-                  <p className="font-medium text-sm">Analyzing your receipt...</p>
-                  <p className="text-xs text-muted-foreground">This usually takes 10–20 seconds</p>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="font-medium text-sm">{parseLabel}</p>
+                  <span className="text-xs text-muted-foreground">{Math.round(parseProgress)}%</span>
                 </div>
+                <Progress value={parseProgress} className="h-2" />
               </div>
             )}
 
