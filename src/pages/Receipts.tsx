@@ -115,6 +115,7 @@ export default function Receipts() {
       if (dbError) throw dbError;
 
       setUploadReceipt(newReceipt);
+      startProgressAnimation();
       setUploadState("parsing");
 
       // Fire and forget — we poll for completion
