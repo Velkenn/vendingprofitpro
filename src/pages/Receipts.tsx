@@ -28,7 +28,10 @@ export default function Receipts() {
   const [uploadState, setUploadState] = useState<UploadState>("idle");
   const [uploadReceipt, setUploadReceipt] = useState<Tables<"receipts"> | null>(null);
   const [errorMsg, setErrorMsg] = useState("");
+  const [parseProgress, setParseProgress] = useState(0);
+  const [parseLabel, setParseLabel] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const progressRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) {
