@@ -42,7 +42,6 @@ const EXTRACT_TOOL = {
         },
       },
       required: ["receipt_type", "vendor", "receipt_date", "items"],
-      additionalProperties: false,
     },
   },
 };
