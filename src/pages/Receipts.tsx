@@ -38,6 +38,10 @@ export default function Receipts() {
       clearInterval(pollRef.current);
       pollRef.current = null;
     }
+    if (progressRef.current) {
+      clearInterval(progressRef.current);
+      progressRef.current = null;
+    }
   }, []);
 
   useEffect(() => () => stopPolling(), [stopPolling]);
