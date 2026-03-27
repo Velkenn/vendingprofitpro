@@ -1,35 +1,30 @@
 
 
-## Fix AI Parsing and Add Progress Bar
+## Fix Receipt Parsing: Use AI as Primary Parser
 
-### Problems identified
+### Problem
+The regex parser is matching only 1 item per receipt and declaring success, which prevents the AI fallback from ever running. The logs show "Regex parser succeeded: 1 items found" on a receipt with $92.90 and many items. The regex patterns don't reliably match the PDF text layout from pdfjs extraction.
 
-1. **Google Gemini API rejects the tool schema** — The edge function logs show: `Unknown name "additionalProperties"`. Google's function calling API doesn't support `additionalProperties` in the schema. Lines 41 and 46 of `parse-receipt/index.ts` include `additionalProperties: false` which breaks Google. The same schema is passed to Anthropic via `input_schema` (line 483) — Anthropic also doesn't use this field.
+### Root cause
+The regex patterns expect specific column spacing (e.g. `\s{2,}` between fields) that rarely matches the actual extracted text. When it accidentally matches one line, it returns 1 item and the code treats that as success — never falling back to AI.
 
-2. **No progress bar during parsing** — The upload UI just shows a spinner with "This usually takes 10-20 seconds".
+### Solution
+Since the user has configured their own AI provider, **use AI as the primary parser** and remove the regex-first approach. The regex was only added as a cost-saving measure for Lovable AI credits, which is no longer relevant.
 
 ### Changes
 
 **File: `supabase/functions/parse-receipt/index.ts`**
 
-- Remove `additionalProperties: false` from both the item schema (line 41) and the top-level parameters (line 46) in `EXTRACT_TOOL`. This fixes the Google 400 error. OpenAI tolerates its absence, and Anthropic doesn't use it either.
-- For the Google provider call (line 537-541), strip `additionalProperties` from a cloned schema before sending, as a safety net.
+In the Phase 2 section (lines 637-688), change the logic to:
+1. Look up the user's AI config first
+2. If an AI provider is configured, use it directly (skip regex)
+3. If no AI provider is configured, fall back to regex as a best-effort parser
+4. Keep all the regex parser functions in the file as the no-AI fallback
 
-**File: `src/pages/Receipts.tsx`**
-
-Replace the "parsing" state UI (lines 189-197) with an animated progress bar:
-- Add state: `parseProgress` number (0-100)
-- When entering "parsing" state, start a simulated progress animation:
-  - 0→30% fast (first 3s) — "Uploading complete"
-  - 30→60% medium (next 5s) — "Extracting text..."  
-  - 60→85% slow (next 10s) — "Analyzing items..."
-  - 85→95% very slow (next 15s) — "Almost done..."
-  - Stays at 95% until polling resolves
-- When state changes to "done", jump to 100%
-- Use the existing `Progress` component from `@/components/ui/progress`
-- Show the current step label below the progress bar
+This is a ~15 line change to the orchestration logic in the main handler. No other files change.
 
 ### Result
-- Google/Anthropic/OpenAI parsing will all work without schema errors
-- Users see a smooth progress bar instead of a static "10-20 seconds" message
+- Receipts will be fully parsed by the user's chosen AI model
+- All items will be extracted reliably
+- Regex still available as fallback if no AI key is configured
 
