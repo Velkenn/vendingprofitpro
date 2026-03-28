@@ -43,6 +43,7 @@ type TimeFilter = "week" | "month" | "year" | "lifetime" | "q1" | "q2" | "q3" | 
 
 export default function Stats() {
   const { user } = useAuth();
+  const { openSKUDetail } = useSKUDetail();
   const [items, setItems] = useState<ReceiptItemWithJoins[]>([]);
   const [loading, setLoading] = useState(true);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("lifetime");
