@@ -21,6 +21,7 @@ interface NewSkuForm {
 export default function NeedsReview() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const { openSKUDetail } = useSKUDetail();
   const [items, setItems] = useState<Tables<"receipt_items">[]>([]);
   const [skus, setSkus] = useState<Tables<"skus">[]>([]);
   const [loading, setLoading] = useState(true);
