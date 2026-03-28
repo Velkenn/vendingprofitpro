@@ -713,10 +713,24 @@ serve(async (req) => {
     const parseStatus = (extractedItems.length >= headerCount || totalQty >= headerCount) ? "PARSED" : "PARTIAL_PARSE";
     console.log(`Final status: ${parseStatus}`);
 
+    // Map vendor string to enum value, store original in store_location if needed
+    const vendorLower = (parsed.vendor || "").toLowerCase();
+    let vendorEnum: string = "sams"; // default
+    if (vendorLower.includes("walmart")) vendorEnum = "walmart";
+    else if (vendorLower.includes("sam")) vendorEnum = "sams";
+    // For non-sams/walmart stores, keep "sams" as default enum but preserve real name in store_location
+
+    // Map receipt_type to enum if possible
+    const rtLower = (parsed.receipt_type || "").toLowerCase();
+    let receiptTypeEnum: string | null = null;
+    if (rtLower.includes("scan") && rtLower.includes("go")) receiptTypeEnum = "sams_scan_and_go";
+    else if (rtLower.includes("delivery")) receiptTypeEnum = "walmart_delivery";
+    else if (rtLower.includes("store") || rtLower.includes("in_store")) receiptTypeEnum = "walmart_store";
+
     // Update receipt header
     await supabase.from("receipts").update({
-      vendor: parsed.vendor,
-      receipt_type: parsed.receipt_type,
+      vendor: vendorEnum,
+      receipt_type: receiptTypeEnum,
       receipt_date: parsed.receipt_date,
       receipt_identifier: parsed.receipt_identifier || null,
       store_location: parsed.store_location || null,
