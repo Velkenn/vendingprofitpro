@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Search, Package, Edit2, Trash2, Check, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useSKUDetail } from "@/contexts/SKUDetailContext";
 import type { Tables } from "@/integrations/supabase/types";
 
 type Sku = Tables<"skus">;
