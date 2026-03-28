@@ -6,8 +6,10 @@ import { Badge } from "@/components/ui/badge";
 import { DollarSign, TrendingUp, ShoppingCart, AlertTriangle, Tag } from "lucide-react";
 import { startOfWeek, endOfWeek, format } from "date-fns";
 import { useNavigate } from "react-router-dom";
+import { useSKUDetail } from "@/contexts/SKUDetailContext";
 
 interface TopSku {
+  skuId: string;
   skuName: string;
   revenue: number;
   cost: number;
