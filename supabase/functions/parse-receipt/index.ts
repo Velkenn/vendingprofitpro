@@ -15,8 +15,8 @@ const EXTRACT_TOOL = {
     parameters: {
       type: "object",
       properties: {
-        receipt_type: { type: "string", enum: ["sams_scan_and_go", "walmart_store", "walmart_delivery"] },
-        vendor: { type: "string", enum: ["sams", "walmart"] },
+        receipt_type: { type: "string", description: "Type of receipt, e.g. in_store, delivery, scan_and_go, online" },
+        vendor: { type: "string", description: "Store name, e.g. Sam's Club, Walmart, Costco, Target, Kroger" },
         receipt_date: { type: "string", description: "YYYY-MM-DD format" },
         receipt_identifier: { type: "string", description: "TC number or Order number" },
         store_location: { type: "string" },
