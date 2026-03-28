@@ -11,6 +11,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSKUDetail } from "@/contexts/SKUDetailContext";
 import type { Tables } from "@/integrations/supabase/types";
 import { format } from "date-fns";
 import { getReceiptStatus } from "@/lib/receipt-status";
