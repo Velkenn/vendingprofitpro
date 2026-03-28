@@ -285,7 +285,7 @@ export default function Receipts() {
       <input
         ref={fileRef}
         type="file"
-        accept=".pdf"
+        accept=".pdf,image/*"
         className="hidden"
         onChange={(e) => setFile(e.target.files?.[0] || null)}
       />

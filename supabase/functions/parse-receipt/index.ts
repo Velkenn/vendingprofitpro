@@ -733,7 +733,7 @@ serve(async (req) => {
       receipt_type: receiptTypeEnum,
       receipt_date: parsed.receipt_date,
       receipt_identifier: parsed.receipt_identifier || null,
-      store_location: parsed.store_location || null,
+      store_location: parsed.store_location || parsed.vendor || null,
       item_count: headerCount,
       subtotal: parsed.subtotal || null,
       tax: parsed.tax || null,
