@@ -1,30 +1,45 @@
 
 
-## Fix Receipt Parsing: Use AI as Primary Parser
+## Use AI-First Parsing for Any Receipt
 
 ### Problem
-The regex parser is matching only 1 item per receipt and declaring success, which prevents the AI fallback from ever running. The logs show "Regex parser succeeded: 1 items found" on a receipt with $92.90 and many items. The regex patterns don't reliably match the PDF text layout from pdfjs extraction.
-
-### Root cause
-The regex patterns expect specific column spacing (e.g. `\s{2,}` between fields) that rarely matches the actual extracted text. When it accidentally matches one line, it returns 1 item and the code treats that as success — never falling back to AI.
-
-### Solution
-Since the user has configured their own AI provider, **use AI as the primary parser** and remove the regex-first approach. The regex was only added as a cost-saving measure for Lovable AI credits, which is no longer relevant.
+1. Regex parser runs first and "succeeds" with 1 item, preventing AI from running
+2. System prompt and schema are hardcoded to only Walmart/Sam's Club receipt types
+3. The `vendor` field on receipt insert is hardcoded to `"sams"`
 
 ### Changes
 
 **File: `supabase/functions/parse-receipt/index.ts`**
 
-In the Phase 2 section (lines 637-688), change the logic to:
-1. Look up the user's AI config first
-2. If an AI provider is configured, use it directly (skip regex)
-3. If no AI provider is configured, fall back to regex as a best-effort parser
-4. Keep all the regex parser functions in the file as the no-AI fallback
+1. **Update `EXTRACT_TOOL` schema** (lines 18-19):
+   - Change `vendor` enum from `["sams", "walmart"]` to a free-text string with description "Store name, e.g. Sam's Club, Walmart, Costco, Target"
+   - Change `receipt_type` from enum to free-text string with description "e.g. in_store, delivery, scan_and_go"
 
-This is a ~15 line change to the orchestration logic in the main handler. No other files change.
+2. **Update `SYSTEM_PROMPT`** (lines 421-435):
+   - Remove Walmart/Sam's-specific instructions
+   - Make it generic: "Parse receipts from any store. Extract ALL line items with their names, quantities, and prices."
+
+3. **Reverse Phase 2 logic** (lines 637-688):
+   - Look up user's AI config first
+   - If AI is configured, use AI directly as primary parser (skip regex entirely)
+   - If no AI configured, fall back to regex as best-effort
+   - This ensures the user's AI always runs when available
+
+4. **Update receipt header update** (lines 712-723):
+   - Handle non-sams/walmart vendors gracefully — store the vendor string from AI response
+   - Since the `vendor` column is an enum (`sams`/`walmart`), default to `"sams"` for unknown vendors but store the actual vendor name in `store_location` if it doesn't match known enums
+
+**File: `src/pages/Receipts.tsx`**
+
+5. **Update upload insert** (line ~101):
+   - Change hardcoded `vendor: "sams"` to `vendor: "sams"` (keep as default since it's required by enum, AI will update it)
+   - Update the file accept to also allow images: `accept=".pdf,image/*"`
+
+6. **Update empty state text** (line ~218):
+   - Change "Sam's Club or Walmart" to "Any store receipt"
 
 ### Result
-- Receipts will be fully parsed by the user's chosen AI model
-- All items will be extracted reliably
-- Regex still available as fallback if no AI key is configured
+- AI always runs first when configured, extracting all items reliably
+- Regex only used as fallback when no AI key is set
+- Any store's receipt can be parsed, not just Walmart/Sam's Club
 
