@@ -12,6 +12,7 @@ import type { Tables } from "@/integrations/supabase/types";
 export default function NeedsPrice() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const { openSKUDetail } = useSKUDetail();
   const [skus, setSkus] = useState<Tables<"skus">[]>([]);
   const [prices, setPrices] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
