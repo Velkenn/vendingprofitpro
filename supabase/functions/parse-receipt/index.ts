@@ -634,39 +634,31 @@ serve(async (req) => {
       });
     }
 
-    // PHASE 2: Parse text — try regex first, then user's AI provider
-    console.log("Phase 2: Attempting regex-based parsing...");
-    let parsed: any = parseReceiptText(rawText);
+    // PHASE 2: Parse text — AI first if configured, regex as fallback
+    console.log("Phase 2: Looking up user AI config...");
 
-    if (parsed && parsed.items.length > 0) {
-      console.log(`Regex parser succeeded: ${parsed.items.length} items found`);
-    } else {
-      console.log("Regex parser found 0 items, falling back to AI...");
+    // Get receipt user_id for AI config lookup
+    const { data: receiptForAI } = await supabase
+      .from("receipts")
+      .select("user_id")
+      .eq("id", receipt_id)
+      .single();
 
-      // Get receipt user_id first for AI config lookup
-      const { data: receiptForAI } = await supabase
-        .from("receipts")
-        .select("user_id")
-        .eq("id", receipt_id)
-        .single();
+    if (!receiptForAI) {
+      return new Response(JSON.stringify({ error: "Receipt not found" }), {
+        status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
-      if (!receiptForAI) {
-        return new Response(JSON.stringify({ error: "Receipt not found" }), {
-          status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
+    const aiConfig = await getUserAIConfig(supabase, receiptForAI.user_id, encryptionKey);
+    let parsed: any = null;
 
-      const aiConfig = await getUserAIConfig(supabase, receiptForAI.user_id, encryptionKey);
-      if (!aiConfig) {
-        await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-        return new Response(JSON.stringify({ error: "No AI provider configured. Please set up an AI provider in Settings → AI Settings." }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
+    if (aiConfig) {
+      // AI is configured — use it as the primary parser
+      console.log(`Using AI (${aiConfig.provider}/${aiConfig.model}) as primary parser...`);
       try {
         parsed = await parseWithUserProvider(rawText, aiConfig.provider, aiConfig.apiKey, aiConfig.model);
-        console.log(`AI (${aiConfig.provider}/${aiConfig.model}) succeeded: ${parsed.items?.length || 0} items`);
+        console.log(`AI succeeded: ${parsed.items?.length || 0} items`);
       } catch (aiErr: any) {
         console.error("AI error:", aiErr.message);
         await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
@@ -683,6 +675,19 @@ serve(async (req) => {
         }
         return new Response(JSON.stringify({ error: `Parsing failed with ${aiConfig.provider}. Check your API key in Settings.` }), {
           status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    } else {
+      // No AI configured — fall back to regex
+      console.log("No AI provider configured, falling back to regex parser...");
+      parsed = parseReceiptText(rawText);
+      if (parsed && parsed.items.length > 0) {
+        console.log(`Regex parser found ${parsed.items.length} items`);
+      } else {
+        console.log("Regex parser found 0 items");
+        await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
+        return new Response(JSON.stringify({ error: "No AI provider configured and regex parsing failed. Please set up an AI provider in Settings → AI Settings." }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
     }
