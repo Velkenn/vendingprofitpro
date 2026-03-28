@@ -129,7 +129,7 @@ export default function ReceiptDetail() {
               <CardContent className="p-3">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
-                    <p className="font-medium text-sm">{item.normalized_name || item.raw_name}</p>
+                    <p className={`font-medium text-sm ${item.sku_id ? "cursor-pointer underline decoration-dotted" : ""}`} onClick={() => item.sku_id && openSKUDetail(item.sku_id)}>{item.normalized_name || item.raw_name}</p>
                     <p className="text-xs text-muted-foreground">
                       Qty: {item.qty}{item.pack_size ? ` × ${item.pack_size}pk` : ""} · Unit: ${Number(item.unit_cost || 0).toFixed(2)}
                     </p>

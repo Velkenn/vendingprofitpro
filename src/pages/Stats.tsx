@@ -343,7 +343,7 @@ export default function Stats() {
                         {index + 1}
                       </Badge>
                       <div>
-                        <p className="font-medium text-sm leading-tight">{sku.sku_name}</p>
+                        <p className="font-medium text-sm leading-tight cursor-pointer underline decoration-dotted" onClick={() => openSKUDetail(sku.sku_id)}>{sku.sku_name}</p>
                         <p className="text-xs text-muted-foreground">{sku.total_units.toLocaleString()} units</p>
                       </div>
                     </div>

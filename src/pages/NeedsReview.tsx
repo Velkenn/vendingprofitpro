@@ -191,7 +191,7 @@ export default function NeedsReview() {
               onClick={() => openItem(item)}
             >
               <CardContent className="p-4">
-                <p className="font-medium text-sm">{item.raw_name}</p>
+                <p className={`font-medium text-sm ${item.sku_id ? "cursor-pointer underline decoration-dotted" : ""}`} onClick={(e) => { if (item.sku_id) { e.stopPropagation(); openSKUDetail(item.sku_id); } }}>{item.raw_name}</p>
                 <p className="text-xs text-muted-foreground">
                   Qty: {item.qty} · ${Number(item.line_total).toFixed(2)}
                 </p>

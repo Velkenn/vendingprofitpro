@@ -207,7 +207,7 @@ export default function Index() {
                     {i + 1}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{sku.skuName}</p>
+                    <p className="text-sm font-medium truncate cursor-pointer underline decoration-dotted" onClick={() => openSKUDetail(sku.skuId)}>{sku.skuName}</p>
                     <p className="text-xs text-muted-foreground">
                       Rev {fmt(sku.revenue)} · Cost {fmt(sku.cost)}
                     </p>
