@@ -19,6 +19,7 @@ interface TopSku {
 export default function Index() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { openSKUDetail } = useSKUDetail();
 
   const [businessSpend, setBusinessSpend] = useState(0);
   const [personalSpend, setPersonalSpend] = useState(0);
