@@ -15,8 +15,8 @@ const EXTRACT_TOOL = {
     parameters: {
       type: "object",
       properties: {
-        receipt_type: { type: "string", enum: ["sams_scan_and_go", "walmart_store", "walmart_delivery"] },
-        vendor: { type: "string", enum: ["sams", "walmart"] },
+        receipt_type: { type: "string", description: "Type of receipt, e.g. in_store, delivery, scan_and_go, online" },
+        vendor: { type: "string", description: "Store name, e.g. Sam's Club, Walmart, Costco, Target, Kroger" },
         receipt_date: { type: "string", description: "YYYY-MM-DD format" },
         receipt_identifier: { type: "string", description: "TC number or Order number" },
         store_location: { type: "string" },
@@ -418,18 +418,18 @@ function parseReceiptText(rawText: string): ParsedReceipt | null {
   return null;
 }
 
-const SYSTEM_PROMPT = `You are a receipt parser for vending machine businesses. Parse the raw receipt text and extract ALL items.
+const SYSTEM_PROMPT = `You are a receipt parser. Parse the raw receipt text and extract ALL line items from ANY store (Walmart, Sam's Club, Costco, Target, Kroger, etc.).
 
-Detect the receipt type:
-- "sams_scan_and_go" if it contains "Scan & Go"
-- "walmart_store" if it's a Walmart in-store receipt
-- "walmart_delivery" if it contains "Order" and delivery info
+For the vendor field, return the store name as it appears on the receipt (e.g. "Sam's Club", "Walmart", "Costco").
+For receipt_type, return one of: "in_store", "delivery", "scan_and_go", "online", or whatever best describes the receipt.
 
-Walmart receipts: Items appear as product descriptions followed by prices. Look for patterns like "qty @ price/ea" or standalone prices after descriptions. Each product+price = one item.
+Items typically appear as product descriptions with quantities and prices. Look for ALL of these patterns:
+- Item number + description + qty + price
+- Description followed by price at end of line
+- "qty @ price/ea" multi-quantity patterns
+- Any line that represents a purchased product with a price
 
-Sam's Club receipts: Items may appear as single lines with item number, description, qty, and price.
-
-CRITICAL: You MUST extract EVERY item from the text. Count carefully and do not miss any items.
+CRITICAL: You MUST extract EVERY item from the text. Count carefully and do not miss any items. Do NOT include subtotals, taxes, totals, payment methods, or non-item lines.
 
 Compute unit_cost = line_total / (qty * pack_size) if pack size exists, else line_total / qty.
 For normalized names, use format: {Brand/Product} – {Flavor/Variant}`;
@@ -634,39 +634,31 @@ serve(async (req) => {
       });
     }
 
-    // PHASE 2: Parse text — try regex first, then user's AI provider
-    console.log("Phase 2: Attempting regex-based parsing...");
-    let parsed: any = parseReceiptText(rawText);
+    // PHASE 2: Parse text — AI first if configured, regex as fallback
+    console.log("Phase 2: Looking up user AI config...");
 
-    if (parsed && parsed.items.length > 0) {
-      console.log(`Regex parser succeeded: ${parsed.items.length} items found`);
-    } else {
-      console.log("Regex parser found 0 items, falling back to AI...");
+    // Get receipt user_id for AI config lookup
+    const { data: receiptForAI } = await supabase
+      .from("receipts")
+      .select("user_id")
+      .eq("id", receipt_id)
+      .single();
 
-      // Get receipt user_id first for AI config lookup
-      const { data: receiptForAI } = await supabase
-        .from("receipts")
-        .select("user_id")
-        .eq("id", receipt_id)
-        .single();
+    if (!receiptForAI) {
+      return new Response(JSON.stringify({ error: "Receipt not found" }), {
+        status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
-      if (!receiptForAI) {
-        return new Response(JSON.stringify({ error: "Receipt not found" }), {
-          status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
+    const aiConfig = await getUserAIConfig(supabase, receiptForAI.user_id, encryptionKey);
+    let parsed: any = null;
 
-      const aiConfig = await getUserAIConfig(supabase, receiptForAI.user_id, encryptionKey);
-      if (!aiConfig) {
-        await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-        return new Response(JSON.stringify({ error: "No AI provider configured. Please set up an AI provider in Settings → AI Settings." }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
+    if (aiConfig) {
+      // AI is configured — use it as the primary parser
+      console.log(`Using AI (${aiConfig.provider}/${aiConfig.model}) as primary parser...`);
       try {
         parsed = await parseWithUserProvider(rawText, aiConfig.provider, aiConfig.apiKey, aiConfig.model);
-        console.log(`AI (${aiConfig.provider}/${aiConfig.model}) succeeded: ${parsed.items?.length || 0} items`);
+        console.log(`AI succeeded: ${parsed.items?.length || 0} items`);
       } catch (aiErr: any) {
         console.error("AI error:", aiErr.message);
         await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
@@ -683,6 +675,19 @@ serve(async (req) => {
         }
         return new Response(JSON.stringify({ error: `Parsing failed with ${aiConfig.provider}. Check your API key in Settings.` }), {
           status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    } else {
+      // No AI configured — fall back to regex
+      console.log("No AI provider configured, falling back to regex parser...");
+      parsed = parseReceiptText(rawText);
+      if (parsed && parsed.items.length > 0) {
+        console.log(`Regex parser found ${parsed.items.length} items`);
+      } else {
+        console.log("Regex parser found 0 items");
+        await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
+        return new Response(JSON.stringify({ error: "No AI provider configured and regex parsing failed. Please set up an AI provider in Settings → AI Settings." }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
     }
@@ -708,13 +713,27 @@ serve(async (req) => {
     const parseStatus = (extractedItems.length >= headerCount || totalQty >= headerCount) ? "PARSED" : "PARTIAL_PARSE";
     console.log(`Final status: ${parseStatus}`);
 
+    // Map vendor string to enum value, store original in store_location if needed
+    const vendorLower = (parsed.vendor || "").toLowerCase();
+    let vendorEnum: string = "sams"; // default
+    if (vendorLower.includes("walmart")) vendorEnum = "walmart";
+    else if (vendorLower.includes("sam")) vendorEnum = "sams";
+    // For non-sams/walmart stores, keep "sams" as default enum but preserve real name in store_location
+
+    // Map receipt_type to enum if possible
+    const rtLower = (parsed.receipt_type || "").toLowerCase();
+    let receiptTypeEnum: string | null = null;
+    if (rtLower.includes("scan") && rtLower.includes("go")) receiptTypeEnum = "sams_scan_and_go";
+    else if (rtLower.includes("delivery")) receiptTypeEnum = "walmart_delivery";
+    else if (rtLower.includes("store") || rtLower.includes("in_store")) receiptTypeEnum = "walmart_store";
+
     // Update receipt header
     await supabase.from("receipts").update({
-      vendor: parsed.vendor,
-      receipt_type: parsed.receipt_type,
+      vendor: vendorEnum,
+      receipt_type: receiptTypeEnum,
       receipt_date: parsed.receipt_date,
       receipt_identifier: parsed.receipt_identifier || null,
-      store_location: parsed.store_location || null,
+      store_location: parsed.store_location || parsed.vendor || null,
       item_count: headerCount,
       subtotal: parsed.subtotal || null,
       tax: parsed.tax || null,
