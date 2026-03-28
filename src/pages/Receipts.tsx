@@ -208,8 +208,8 @@ export default function Receipts() {
                 ) : (
                   <>
                     <UploadIcon className="h-10 w-10 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">Tap to select a PDF receipt</p>
-                    <p className="text-xs text-muted-foreground">Sam's Club or Walmart</p>
+                    <p className="text-sm text-muted-foreground">Tap to select a receipt</p>
+                    <p className="text-xs text-muted-foreground">PDF from any store</p>
                     <Button variant="outline" size="sm" className="mt-2" onClick={(e) => { e.stopPropagation(); handleUploadReset(); }}>
                       Cancel
                     </Button>
