@@ -43,6 +43,7 @@ interface EditForm {
 export default function SKUs() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const { openSKUDetail } = useSKUDetail();
   const [skus, setSkus] = useState<Sku[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
