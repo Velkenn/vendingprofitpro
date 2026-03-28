@@ -418,18 +418,18 @@ function parseReceiptText(rawText: string): ParsedReceipt | null {
   return null;
 }
 
-const SYSTEM_PROMPT = `You are a receipt parser for vending machine businesses. Parse the raw receipt text and extract ALL items.
+const SYSTEM_PROMPT = `You are a receipt parser. Parse the raw receipt text and extract ALL line items from ANY store (Walmart, Sam's Club, Costco, Target, Kroger, etc.).
 
-Detect the receipt type:
-- "sams_scan_and_go" if it contains "Scan & Go"
-- "walmart_store" if it's a Walmart in-store receipt
-- "walmart_delivery" if it contains "Order" and delivery info
+For the vendor field, return the store name as it appears on the receipt (e.g. "Sam's Club", "Walmart", "Costco").
+For receipt_type, return one of: "in_store", "delivery", "scan_and_go", "online", or whatever best describes the receipt.
 
-Walmart receipts: Items appear as product descriptions followed by prices. Look for patterns like "qty @ price/ea" or standalone prices after descriptions. Each product+price = one item.
+Items typically appear as product descriptions with quantities and prices. Look for ALL of these patterns:
+- Item number + description + qty + price
+- Description followed by price at end of line
+- "qty @ price/ea" multi-quantity patterns
+- Any line that represents a purchased product with a price
 
-Sam's Club receipts: Items may appear as single lines with item number, description, qty, and price.
-
-CRITICAL: You MUST extract EVERY item from the text. Count carefully and do not miss any items.
+CRITICAL: You MUST extract EVERY item from the text. Count carefully and do not miss any items. Do NOT include subtotals, taxes, totals, payment methods, or non-item lines.
 
 Compute unit_cost = line_total / (qty * pack_size) if pack size exists, else line_total / qty.
 For normalized names, use format: {Brand/Product} – {Flavor/Variant}`;
