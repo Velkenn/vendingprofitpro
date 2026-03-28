@@ -23,6 +23,7 @@ export default function ReceiptDetail() {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { user } = useAuth();
+  const { openSKUDetail } = useSKUDetail();
   const [receipt, setReceipt] = useState<Tables<"receipts"> | null>(null);
   const [items, setItems] = useState<Tables<"receipt_items">[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
