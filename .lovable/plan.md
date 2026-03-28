@@ -1,45 +1,77 @@
 
 
-## Use AI-First Parsing for Any Receipt
+## SKU Detail Modal — Tappable SKU Names Across the App
 
-### Problem
-1. Regex parser runs first and "succeeds" with 1 item, preventing AI from running
-2. System prompt and schema are hardcoded to only Walmart/Sam's Club receipt types
-3. The `vendor` field on receipt insert is hardcoded to `"sams"`
+### Overview
+Create a reusable `SKUDetailModal` component (drawer/bottom sheet style) that opens when any SKU name is tapped anywhere in the app. It fetches all purchase history and profit data from the database and displays it in a scrollable, green-and-white themed modal.
 
-### Changes
+### New Component: `src/components/sku/SKUDetailModal.tsx`
 
-**File: `supabase/functions/parse-receipt/index.ts`**
+A Drawer (bottom sheet on mobile) that accepts `skuId` and `open`/`onClose` props.
 
-1. **Update `EXTRACT_TOOL` schema** (lines 18-19):
-   - Change `vendor` enum from `["sams", "walmart"]` to a free-text string with description "Store name, e.g. Sam's Club, Walmart, Costco, Target"
-   - Change `receipt_type` from enum to free-text string with description "e.g. in_store, delivery, scan_and_go"
+**Data fetched on open:**
+- SKU record from `skus` table (name, sell_price, category, rebuy_status)
+- All `receipt_items` where `sku_id` matches, joined with `receipts` for `receipt_date` and `vendor`
 
-2. **Update `SYSTEM_PROMPT`** (lines 421-435):
-   - Remove Walmart/Sam's-specific instructions
-   - Make it generic: "Parse receipts from any store. Extract ALL line items with their names, quantities, and prices."
+**Sections displayed:**
+1. **Header** — Full SKU name (untruncated), category badge, rebuy status badge, close button
+2. **Purchase History** — List of each purchase: date, qty × pack_size, unit cost, line total. Sorted by date descending.
+3. **Profit Breakdown** — For each purchase entry (where sell_price exists): revenue (qty × pack_size × sell_price), cost (line_total), profit (revenue - cost). Entries without sell_price show "No sell price set".
+4. **Summary Card** — Total units purchased (sum of qty × pack_size), average cost per unit, total revenue, total cost, total profit. All in a compact card at the bottom.
 
-3. **Reverse Phase 2 logic** (lines 637-688):
-   - Look up user's AI config first
-   - If AI is configured, use AI directly as primary parser (skip regex entirely)
-   - If no AI configured, fall back to regex as best-effort
-   - This ensures the user's AI always runs when available
+Uses `Drawer` component for mobile-friendly bottom sheet. Content wrapped in `ScrollArea`.
 
-4. **Update receipt header update** (lines 712-723):
-   - Handle non-sams/walmart vendors gracefully — store the vendor string from AI response
-   - Since the `vendor` column is an enum (`sams`/`walmart`), default to `"sams"` for unknown vendors but store the actual vendor name in `store_location` if it doesn't match known enums
+### New Component: `src/components/sku/TappableSKUName.tsx`
 
-**File: `src/pages/Receipts.tsx`**
+A small wrapper component:
+```
+<span className="cursor-pointer underline decoration-dotted" onClick={() => open modal}>
+  {children}
+</span>
+```
+Manages the modal open state internally. Accepts `skuId` and `children` (the display name).
 
-5. **Update upload insert** (line ~101):
-   - Change hardcoded `vendor: "sams"` to `vendor: "sams"` (keep as default since it's required by enum, AI will update it)
-   - Update the file accept to also allow images: `accept=".pdf,image/*"`
+### Context: `src/contexts/SKUDetailContext.tsx`
 
-6. **Update empty state text** (line ~218):
-   - Change "Sam's Club or Walmart" to "Any store receipt"
+A lightweight context provider wrapping the app that holds `openSKUDetail(skuId)` and renders a single `SKUDetailModal` instance. This avoids mounting multiple modals. Pages call `useSKUDetail()` to get the `openSKUDetail` function.
 
-### Result
-- AI always runs first when configured, extracting all items reliably
-- Regex only used as fallback when no AI key is set
-- Any store's receipt can be parsed, not just Walmart/Sam's Club
+Add the provider in `App.tsx` inside the router.
+
+### Pages to update (make SKU names tappable)
+
+Each page gets a simple change — wrap SKU name text in a clickable span that calls `openSKUDetail(skuId)`:
+
+1. **`src/pages/SKUs.tsx`** (line 303) — `sku.sku_name` in the card list view
+2. **`src/pages/Index.tsx`** (line 207) — `sku.skuName` in Top 5 SKUs (needs sku_id added to the TopSku type and data)
+3. **`src/pages/ReceiptDetail.tsx`** (line 130) — `item.normalized_name || item.raw_name` (only when `item.sku_id` exists)
+4. **`src/pages/NeedsReview.tsx`** (line 192) — `item.raw_name` in collapsed view (only when `item.sku_id` exists)
+5. **`src/pages/NeedsPrice.tsx`** (line 63) — `sku.sku_name`
+6. **`src/pages/Stats.tsx`** — SKU names in the top SKUs list (need to check exact lines, but same pattern)
+
+### Styling
+- Green header bar matching `--primary: 153 60% 33%`
+- White card backgrounds
+- Same font and spacing as existing cards
+- Profit numbers green when positive, red when negative
+
+### Data flow
+```text
+User taps SKU name
+  → useSKUDetail().openSKUDetail(skuId)
+  → SKUDetailModal opens
+  → Fetches: skus.select(*).eq(id, skuId)
+  → Fetches: receipt_items.select(*, receipts(receipt_date, vendor)).eq(sku_id, skuId)
+  → Renders purchase history, profit, summary
+```
+
+### Files changed/created
+- **Create**: `src/contexts/SKUDetailContext.tsx`
+- **Create**: `src/components/sku/SKUDetailModal.tsx`
+- **Edit**: `src/App.tsx` — wrap routes with `SKUDetailProvider`
+- **Edit**: `src/pages/SKUs.tsx` — make sku_name tappable
+- **Edit**: `src/pages/Index.tsx` — add sku_id to TopSku, make names tappable
+- **Edit**: `src/pages/ReceiptDetail.tsx` — make item names tappable when linked to SKU
+- **Edit**: `src/pages/NeedsReview.tsx` — make item names tappable when linked to SKU
+- **Edit**: `src/pages/NeedsPrice.tsx` — make sku_name tappable
+- **Edit**: `src/pages/Stats.tsx` — make SKU names tappable in leaderboard
 
