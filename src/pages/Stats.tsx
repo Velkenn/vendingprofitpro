@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { BarChart3, Package, DollarSign, TrendingUp, Store } from "lucide-react";
+import { useSKUDetail } from "@/contexts/SKUDetailContext";
 import type { Tables } from "@/integrations/supabase/types";
 import { startOfWeek, startOfMonth, startOfYear, isAfter, isBefore } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -42,6 +43,7 @@ type TimeFilter = "week" | "month" | "year" | "lifetime" | "q1" | "q2" | "q3" | 
 
 export default function Stats() {
   const { user } = useAuth();
+  const { openSKUDetail } = useSKUDetail();
   const [items, setItems] = useState<ReceiptItemWithJoins[]>([]);
   const [loading, setLoading] = useState(true);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("lifetime");
@@ -341,7 +343,7 @@ export default function Stats() {
                         {index + 1}
                       </Badge>
                       <div>
-                        <p className="font-medium text-sm leading-tight">{sku.sku_name}</p>
+                        <p className="font-medium text-sm leading-tight cursor-pointer underline decoration-dotted" onClick={() => openSKUDetail(sku.sku_id)}>{sku.sku_name}</p>
                         <p className="text-xs text-muted-foreground">{sku.total_units.toLocaleString()} units</p>
                       </div>
                     </div>

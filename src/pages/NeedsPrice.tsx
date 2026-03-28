@@ -6,11 +6,13 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Tag, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useSKUDetail } from "@/contexts/SKUDetailContext";
 import type { Tables } from "@/integrations/supabase/types";
 
 export default function NeedsPrice() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const { openSKUDetail } = useSKUDetail();
   const [skus, setSkus] = useState<Tables<"skus">[]>([]);
   const [prices, setPrices] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -60,7 +62,7 @@ export default function NeedsPrice() {
             <Card key={sku.id} className="border-0 shadow-sm">
               <CardContent className="flex items-center gap-3 p-4">
                 <div className="flex-1">
-                  <p className="font-medium text-sm">{sku.sku_name}</p>
+                  <p className="font-medium text-sm cursor-pointer underline decoration-dotted" onClick={() => openSKUDetail(sku.id)}>{sku.sku_name}</p>
                   <p className="text-xs text-muted-foreground">{sku.category}</p>
                 </div>
                 <div className="flex items-center gap-2">

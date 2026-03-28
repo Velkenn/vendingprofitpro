@@ -9,6 +9,7 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, Check, X, Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useSKUDetail } from "@/contexts/SKUDetailContext";
 import type { Tables } from "@/integrations/supabase/types";
 
 interface NewSkuForm {
@@ -20,6 +21,7 @@ interface NewSkuForm {
 export default function NeedsReview() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const { openSKUDetail } = useSKUDetail();
   const [items, setItems] = useState<Tables<"receipt_items">[]>([]);
   const [skus, setSkus] = useState<Tables<"skus">[]>([]);
   const [loading, setLoading] = useState(true);
@@ -189,7 +191,7 @@ export default function NeedsReview() {
               onClick={() => openItem(item)}
             >
               <CardContent className="p-4">
-                <p className="font-medium text-sm">{item.raw_name}</p>
+                <p className={`font-medium text-sm ${item.sku_id ? "cursor-pointer underline decoration-dotted" : ""}`} onClick={(e) => { if (item.sku_id) { e.stopPropagation(); openSKUDetail(item.sku_id); } }}>{item.raw_name}</p>
                 <p className="text-xs text-muted-foreground">
                   Qty: {item.qty} · ${Number(item.line_total).toFixed(2)}
                 </p>

@@ -6,8 +6,10 @@ import { Badge } from "@/components/ui/badge";
 import { DollarSign, TrendingUp, ShoppingCart, AlertTriangle, Tag } from "lucide-react";
 import { startOfWeek, endOfWeek, format } from "date-fns";
 import { useNavigate } from "react-router-dom";
+import { useSKUDetail } from "@/contexts/SKUDetailContext";
 
 interface TopSku {
+  skuId: string;
   skuName: string;
   revenue: number;
   cost: number;
@@ -17,6 +19,7 @@ interface TopSku {
 export default function Index() {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { openSKUDetail } = useSKUDetail();
 
   const [businessSpend, setBusinessSpend] = useState(0);
   const [personalSpend, setPersonalSpend] = useState(0);
@@ -112,12 +115,12 @@ export default function Index() {
       .eq("is_personal", false)
       .not("sku_id", "is", null);
 
-    const skuMap = new Map<string, { skuName: string; revenue: number; cost: number }>();
+    const skuMap = new Map<string, { skuName: string; skuId: string; revenue: number; cost: number }>();
     for (const item of allItems || []) {
       const sku = item.skus as any;
       if (!sku?.sell_price || !item.pack_size) continue;
       const id = item.sku_id!;
-      const entry = skuMap.get(id) || { skuName: sku.sku_name, revenue: 0, cost: 0 };
+      const entry = skuMap.get(id) || { skuName: sku.sku_name, skuId: id, revenue: 0, cost: 0 };
       const rev = (item.qty || 1) * (item.pack_size || 1) * Number(sku.sell_price);
       entry.revenue += rev;
       entry.cost += Number(item.line_total) || 0;
@@ -204,7 +207,7 @@ export default function Index() {
                     {i + 1}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{sku.skuName}</p>
+                    <p className="text-sm font-medium truncate cursor-pointer underline decoration-dotted" onClick={() => openSKUDetail(sku.skuId)}>{sku.skuName}</p>
                     <p className="text-xs text-muted-foreground">
                       Rev {fmt(sku.revenue)} · Cost {fmt(sku.cost)}
                     </p>

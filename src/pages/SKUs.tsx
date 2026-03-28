@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Search, Package, Edit2, Trash2, Check, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useSKUDetail } from "@/contexts/SKUDetailContext";
 import type { Tables } from "@/integrations/supabase/types";
 
 type Sku = Tables<"skus">;
@@ -42,6 +43,7 @@ interface EditForm {
 export default function SKUs() {
   const { user } = useAuth();
   const { toast } = useToast();
+  const { openSKUDetail } = useSKUDetail();
   const [skus, setSkus] = useState<Sku[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -300,7 +302,7 @@ export default function SKUs() {
               <Card key={sku.id} className="border-0 shadow-sm">
                 <CardContent className="flex items-center gap-3 p-4">
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm truncate">{sku.sku_name}</p>
+                    <p className="font-medium text-sm truncate cursor-pointer underline decoration-dotted" onClick={(e) => { e.stopPropagation(); openSKUDetail(sku.id); }}>{sku.sku_name}</p>
                     <p className="text-xs text-muted-foreground">{sku.category || "Uncategorized"}</p>
                   </div>
                   <div className="text-right flex flex-col items-end gap-1 shrink-0">
