@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Tag, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useSKUDetail } from "@/contexts/SKUDetailContext";
 import type { Tables } from "@/integrations/supabase/types";
 
 export default function NeedsPrice() {
