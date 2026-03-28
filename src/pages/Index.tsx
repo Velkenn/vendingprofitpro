@@ -120,7 +120,7 @@ export default function Index() {
       const sku = item.skus as any;
       if (!sku?.sell_price || !item.pack_size) continue;
       const id = item.sku_id!;
-      const entry = skuMap.get(id) || { skuName: sku.sku_name, revenue: 0, cost: 0 };
+      const entry = skuMap.get(id) || { skuName: sku.sku_name, skuId: id, revenue: 0, cost: 0 };
       const rev = (item.qty || 1) * (item.pack_size || 1) * Number(sku.sell_price);
       entry.revenue += rev;
       entry.cost += Number(item.line_total) || 0;
