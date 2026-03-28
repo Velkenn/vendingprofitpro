@@ -115,7 +115,7 @@ export default function Index() {
       .eq("is_personal", false)
       .not("sku_id", "is", null);
 
-    const skuMap = new Map<string, { skuName: string; revenue: number; cost: number }>();
+    const skuMap = new Map<string, { skuName: string; skuId: string; revenue: number; cost: number }>();
     for (const item of allItems || []) {
       const sku = item.skus as any;
       if (!sku?.sell_price || !item.pack_size) continue;
