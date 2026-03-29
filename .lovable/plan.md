@@ -1,46 +1,40 @@
 
 
-## Add Machines Tab with Full Feature Set
+## Add Navigation for Past Weeks/Months/Years on Stats and Machines Tabs
 
-### Database Changes (3 new tables via migration)
+### Problem
+Currently "Week" shows only the current week, "Month" only the current month, and "Year" only the current year. Users cannot navigate to previous periods (e.g. last week, two months ago).
 
-**`machines`** — id (uuid PK), user_id (uuid, not null), name (text), location (text), created_at (timestamptz default now())
+### Solution
+Add left/right arrow buttons flanking the time filter so users can step backward and forward through periods. When a relative filter (Week/Month/Year) is selected, show the period label (e.g. "Mar 23–29, 2026") with `‹` and `›` arrows to navigate. The right arrow is disabled when viewing the current period.
 
-**`machine_sales`** — id (uuid PK), machine_id (uuid FK → machines.id on delete cascade), user_id (uuid, not null), date (date), cash_amount (numeric default 0), credit_amount (numeric default 0), created_at (timestamptz default now())
+### Changes
 
-**`machine_skus`** — id (uuid PK), machine_id (uuid FK → machines.id on delete cascade), sku_id (uuid FK → skus.id on delete cascade), user_id (uuid, not null), created_at (timestamptz default now()), unique(machine_id, sku_id)
+**File: `src/pages/Stats.tsx`**
 
-All three tables get RLS enabled with user_id-based policies for SELECT, INSERT, UPDATE, DELETE.
+1. Add a `periodOffset` state (number, default 0; negative = past periods)
+2. Reset `periodOffset` to 0 when `timeFilter` changes
+3. Update `getFilteredItems` to shift the date window by `periodOffset` weeks/months/years using `subWeeks`, `subMonths`, `subYears` from date-fns
+4. Render a navigation row below the filter buttons: `‹ [period label] ›`
+   - Label shows the date range (e.g. "Mar 23–29" for week, "March 2026" for month, "2025" for year)
+   - Left arrow decrements offset, right arrow increments (capped at 0)
+   - Hidden when filter is "lifetime" or a quarter
 
-### New Files
+**File: `src/pages/Machines.tsx`**
 
-1. **`src/pages/Machines.tsx`** — Main machines list page
-   - Summary stats card at top: total cash, credit, revenue, estimated profit with week/month/year/lifetime toggle
-   - Estimated profit = total revenue minus average cost of SKUs linked across all machines
-   - List of machine cards showing name, location, this week's revenue
-   - "Add Machine" button → dialog collecting name + location, inserts to `machines`
+1. Same pattern: add `periodOffset` state, reset on filter change
+2. Update `getFilterStart` to accept an offset and compute the shifted start/end dates
+3. Add the same `‹ [period label] ›` navigation row below the filter buttons
+4. Hidden when filter is "lifetime"
 
-2. **`src/pages/MachineDetail.tsx`** — Machine detail page (route: `/machines/:id`)
-   - Stats card: cash, credit, combined revenue, estimated profit with week/month/year/lifetime tabs + cash vs credit % split
-   - Warning banner if no sales entry in past 7 days
-   - "Log Sales" button → dialog collecting date, cash amount, credit amount → inserts to `machine_sales`
-   - Sales history list: date, cash, credit, total per entry (chronological)
-   - "Products in this Machine" section: shows linked SKUs from `machine_skus`, button to search/add existing SKUs, remove button per SKU
-   - Export CSV button: downloads all sales entries as CSV (date, cash, credit, total, estimated profit)
+**File: `src/pages/MachineDetail.tsx`**
 
-### Edited Files
+Same changes as Machines.tsx — add period offset navigation to the detail page's time filter.
 
-3. **`src/components/BottomNav.tsx`** — Add Machines tab between SKUs and More using a vending machine icon (e.g. `Monitor` or `Cpu` from lucide, or custom). Nav items become: Home, Receipts, Stats, SKUs, Machines, More (6 tabs).
-
-4. **`src/App.tsx`** — Add routes `/machines` and `/machines/:id` inside the protected AppShell layout.
-
-### Profit Calculation Logic
-- For each machine, get linked SKUs via `machine_skus`
-- For each SKU, look up average unit cost from `receipt_items` and `sell_price` from `skus`
-- Estimated profit per machine = total machine revenue - (sum of avg_cost × estimated units sold across linked SKUs)
-- Simple approach: profit margin % = (sell_price - avg_cost) / sell_price per SKU, then apply average margin to machine revenue
-
-### Styling
-- Same green/white theme, Card components, Badge components as existing pages
-- Time filter toggle matches Stats page pattern
+### UI Layout
+```text
+[ Week ] [ Month ] [ Year ] [ Lifetime ]
+      ‹  Mar 23–29, 2026  ›
+```
+Arrows are small icon buttons using `ChevronLeft` / `ChevronRight` from lucide. The label is centered between them.
 
