@@ -1,77 +1,46 @@
 
 
-## SKU Detail Modal — Tappable SKU Names Across the App
+## Add Machines Tab with Full Feature Set
 
-### Overview
-Create a reusable `SKUDetailModal` component (drawer/bottom sheet style) that opens when any SKU name is tapped anywhere in the app. It fetches all purchase history and profit data from the database and displays it in a scrollable, green-and-white themed modal.
+### Database Changes (3 new tables via migration)
 
-### New Component: `src/components/sku/SKUDetailModal.tsx`
+**`machines`** — id (uuid PK), user_id (uuid, not null), name (text), location (text), created_at (timestamptz default now())
 
-A Drawer (bottom sheet on mobile) that accepts `skuId` and `open`/`onClose` props.
+**`machine_sales`** — id (uuid PK), machine_id (uuid FK → machines.id on delete cascade), user_id (uuid, not null), date (date), cash_amount (numeric default 0), credit_amount (numeric default 0), created_at (timestamptz default now())
 
-**Data fetched on open:**
-- SKU record from `skus` table (name, sell_price, category, rebuy_status)
-- All `receipt_items` where `sku_id` matches, joined with `receipts` for `receipt_date` and `vendor`
+**`machine_skus`** — id (uuid PK), machine_id (uuid FK → machines.id on delete cascade), sku_id (uuid FK → skus.id on delete cascade), user_id (uuid, not null), created_at (timestamptz default now()), unique(machine_id, sku_id)
 
-**Sections displayed:**
-1. **Header** — Full SKU name (untruncated), category badge, rebuy status badge, close button
-2. **Purchase History** — List of each purchase: date, qty × pack_size, unit cost, line total. Sorted by date descending.
-3. **Profit Breakdown** — For each purchase entry (where sell_price exists): revenue (qty × pack_size × sell_price), cost (line_total), profit (revenue - cost). Entries without sell_price show "No sell price set".
-4. **Summary Card** — Total units purchased (sum of qty × pack_size), average cost per unit, total revenue, total cost, total profit. All in a compact card at the bottom.
+All three tables get RLS enabled with user_id-based policies for SELECT, INSERT, UPDATE, DELETE.
 
-Uses `Drawer` component for mobile-friendly bottom sheet. Content wrapped in `ScrollArea`.
+### New Files
 
-### New Component: `src/components/sku/TappableSKUName.tsx`
+1. **`src/pages/Machines.tsx`** — Main machines list page
+   - Summary stats card at top: total cash, credit, revenue, estimated profit with week/month/year/lifetime toggle
+   - Estimated profit = total revenue minus average cost of SKUs linked across all machines
+   - List of machine cards showing name, location, this week's revenue
+   - "Add Machine" button → dialog collecting name + location, inserts to `machines`
 
-A small wrapper component:
-```
-<span className="cursor-pointer underline decoration-dotted" onClick={() => open modal}>
-  {children}
-</span>
-```
-Manages the modal open state internally. Accepts `skuId` and `children` (the display name).
+2. **`src/pages/MachineDetail.tsx`** — Machine detail page (route: `/machines/:id`)
+   - Stats card: cash, credit, combined revenue, estimated profit with week/month/year/lifetime tabs + cash vs credit % split
+   - Warning banner if no sales entry in past 7 days
+   - "Log Sales" button → dialog collecting date, cash amount, credit amount → inserts to `machine_sales`
+   - Sales history list: date, cash, credit, total per entry (chronological)
+   - "Products in this Machine" section: shows linked SKUs from `machine_skus`, button to search/add existing SKUs, remove button per SKU
+   - Export CSV button: downloads all sales entries as CSV (date, cash, credit, total, estimated profit)
 
-### Context: `src/contexts/SKUDetailContext.tsx`
+### Edited Files
 
-A lightweight context provider wrapping the app that holds `openSKUDetail(skuId)` and renders a single `SKUDetailModal` instance. This avoids mounting multiple modals. Pages call `useSKUDetail()` to get the `openSKUDetail` function.
+3. **`src/components/BottomNav.tsx`** — Add Machines tab between SKUs and More using a vending machine icon (e.g. `Monitor` or `Cpu` from lucide, or custom). Nav items become: Home, Receipts, Stats, SKUs, Machines, More (6 tabs).
 
-Add the provider in `App.tsx` inside the router.
+4. **`src/App.tsx`** — Add routes `/machines` and `/machines/:id` inside the protected AppShell layout.
 
-### Pages to update (make SKU names tappable)
-
-Each page gets a simple change — wrap SKU name text in a clickable span that calls `openSKUDetail(skuId)`:
-
-1. **`src/pages/SKUs.tsx`** (line 303) — `sku.sku_name` in the card list view
-2. **`src/pages/Index.tsx`** (line 207) — `sku.skuName` in Top 5 SKUs (needs sku_id added to the TopSku type and data)
-3. **`src/pages/ReceiptDetail.tsx`** (line 130) — `item.normalized_name || item.raw_name` (only when `item.sku_id` exists)
-4. **`src/pages/NeedsReview.tsx`** (line 192) — `item.raw_name` in collapsed view (only when `item.sku_id` exists)
-5. **`src/pages/NeedsPrice.tsx`** (line 63) — `sku.sku_name`
-6. **`src/pages/Stats.tsx`** — SKU names in the top SKUs list (need to check exact lines, but same pattern)
+### Profit Calculation Logic
+- For each machine, get linked SKUs via `machine_skus`
+- For each SKU, look up average unit cost from `receipt_items` and `sell_price` from `skus`
+- Estimated profit per machine = total machine revenue - (sum of avg_cost × estimated units sold across linked SKUs)
+- Simple approach: profit margin % = (sell_price - avg_cost) / sell_price per SKU, then apply average margin to machine revenue
 
 ### Styling
-- Green header bar matching `--primary: 153 60% 33%`
-- White card backgrounds
-- Same font and spacing as existing cards
-- Profit numbers green when positive, red when negative
-
-### Data flow
-```text
-User taps SKU name
-  → useSKUDetail().openSKUDetail(skuId)
-  → SKUDetailModal opens
-  → Fetches: skus.select(*).eq(id, skuId)
-  → Fetches: receipt_items.select(*, receipts(receipt_date, vendor)).eq(sku_id, skuId)
-  → Renders purchase history, profit, summary
-```
-
-### Files changed/created
-- **Create**: `src/contexts/SKUDetailContext.tsx`
-- **Create**: `src/components/sku/SKUDetailModal.tsx`
-- **Edit**: `src/App.tsx` — wrap routes with `SKUDetailProvider`
-- **Edit**: `src/pages/SKUs.tsx` — make sku_name tappable
-- **Edit**: `src/pages/Index.tsx` — add sku_id to TopSku, make names tappable
-- **Edit**: `src/pages/ReceiptDetail.tsx` — make item names tappable when linked to SKU
-- **Edit**: `src/pages/NeedsReview.tsx` — make item names tappable when linked to SKU
-- **Edit**: `src/pages/NeedsPrice.tsx` — make sku_name tappable
-- **Edit**: `src/pages/Stats.tsx` — make SKU names tappable in leaderboard
+- Same green/white theme, Card components, Badge components as existing pages
+- Time filter toggle matches Stats page pattern
 
