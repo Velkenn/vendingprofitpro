@@ -47,6 +47,107 @@ export type Database = {
         }
         Relationships: []
       }
+      machine_sales: {
+        Row: {
+          cash_amount: number
+          created_at: string
+          credit_amount: number
+          date: string
+          id: string
+          machine_id: string
+          user_id: string
+        }
+        Insert: {
+          cash_amount?: number
+          created_at?: string
+          credit_amount?: number
+          date: string
+          id?: string
+          machine_id: string
+          user_id: string
+        }
+        Update: {
+          cash_amount?: number
+          created_at?: string
+          credit_amount?: number
+          date?: string
+          id?: string
+          machine_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "machine_sales_machine_id_fkey"
+            columns: ["machine_id"]
+            isOneToOne: false
+            referencedRelation: "machines"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      machine_skus: {
+        Row: {
+          created_at: string
+          id: string
+          machine_id: string
+          sku_id: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          machine_id: string
+          sku_id: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          machine_id?: string
+          sku_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "machine_skus_machine_id_fkey"
+            columns: ["machine_id"]
+            isOneToOne: false
+            referencedRelation: "machines"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "machine_skus_sku_id_fkey"
+            columns: ["sku_id"]
+            isOneToOne: false
+            referencedRelation: "skus"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      machines: {
+        Row: {
+          created_at: string
+          id: string
+          location: string | null
+          name: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          location?: string | null
+          name: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          location?: string | null
+          name?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
