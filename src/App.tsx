@@ -20,6 +20,8 @@ import CostTrends from "@/pages/CostTrends";
 import ProfitLeaderboard from "@/pages/ProfitLeaderboard";
 import SettingsPage from "@/pages/SettingsPage";
 import Export from "@/pages/Export";
+import Machines from "@/pages/Machines";
+import MachineDetail from "@/pages/MachineDetail";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
