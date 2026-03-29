@@ -49,6 +49,8 @@ function AppRoutes() {
         <Route path="/purchases" element={<Purchases />} />
         <Route path="/cost-trends" element={<CostTrends />} />
         <Route path="/profit-leaderboard" element={<ProfitLeaderboard />} />
+        <Route path="/machines" element={<Machines />} />
+        <Route path="/machines/:id" element={<MachineDetail />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/export" element={<Export />} />
       </Route>

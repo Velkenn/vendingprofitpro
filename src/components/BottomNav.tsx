@@ -7,6 +7,7 @@ const navItems = [
   { path: "/receipts", icon: Receipt, label: "Receipts" },
   { path: "/stats", icon: BarChart3, label: "Stats" },
   { path: "/skus", icon: Package, label: "SKUs" },
+  { path: "/machines", icon: Monitor, label: "Machines" },
   { path: "/settings", icon: Settings, label: "More" },
 ];
 
