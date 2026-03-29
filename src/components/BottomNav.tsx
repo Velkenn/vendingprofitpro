@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Receipt, Package, BarChart3, Settings } from "lucide-react";
+import { LayoutDashboard, Receipt, Package, BarChart3, Settings, Monitor } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -7,6 +7,7 @@ const navItems = [
   { path: "/receipts", icon: Receipt, label: "Receipts" },
   { path: "/stats", icon: BarChart3, label: "Stats" },
   { path: "/skus", icon: Package, label: "SKUs" },
+  { path: "/machines", icon: Monitor, label: "Machines" },
   { path: "/settings", icon: Settings, label: "More" },
 ];
 

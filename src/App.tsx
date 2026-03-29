@@ -20,6 +20,8 @@ import CostTrends from "@/pages/CostTrends";
 import ProfitLeaderboard from "@/pages/ProfitLeaderboard";
 import SettingsPage from "@/pages/SettingsPage";
 import Export from "@/pages/Export";
+import Machines from "@/pages/Machines";
+import MachineDetail from "@/pages/MachineDetail";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -47,6 +49,8 @@ function AppRoutes() {
         <Route path="/purchases" element={<Purchases />} />
         <Route path="/cost-trends" element={<CostTrends />} />
         <Route path="/profit-leaderboard" element={<ProfitLeaderboard />} />
+        <Route path="/machines" element={<Machines />} />
+        <Route path="/machines/:id" element={<MachineDetail />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/export" element={<Export />} />
       </Route>
