@@ -9,8 +9,8 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { AlertTriangle, ArrowLeft, Banknote, CreditCard, DollarSign, Download, Plus, Search, Trash2, X } from "lucide-react";
-import { startOfWeek, startOfMonth, startOfYear, isAfter, format, differenceInDays } from "date-fns";
+import { AlertTriangle, ArrowLeft, Banknote, CreditCard, DollarSign, Download, Plus, Search, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
+import { startOfWeek, startOfMonth, startOfYear, endOfWeek, endOfMonth, endOfYear, isAfter, isBefore, subWeeks, subMonths, subYears, format, differenceInDays } from "date-fns";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 import { useSKUDetail } from "@/contexts/SKUDetailContext";
@@ -39,12 +39,30 @@ const TIME_FILTERS: { value: TimeFilter; label: string }[] = [
   { value: "lifetime", label: "Lifetime" },
 ];
 
-function getFilterStart(filter: TimeFilter): Date | null {
+function getFilterRange(filter: TimeFilter, offset: number): { start: Date; end: Date } | null {
   const now = new Date();
-  if (filter === "week") return startOfWeek(now, { weekStartsOn: 0 });
-  if (filter === "month") return startOfMonth(now);
-  if (filter === "year") return startOfYear(now);
+  if (filter === "week") {
+    const base = subWeeks(startOfWeek(now, { weekStartsOn: 0 }), -offset);
+    return { start: base, end: endOfWeek(base, { weekStartsOn: 0 }) };
+  }
+  if (filter === "month") {
+    const base = subMonths(startOfMonth(now), -offset);
+    return { start: base, end: endOfMonth(base) };
+  }
+  if (filter === "year") {
+    const base = subYears(startOfYear(now), -offset);
+    return { start: base, end: endOfYear(base) };
+  }
   return null;
+}
+
+function getPeriodLabel(filter: TimeFilter, offset: number): string {
+  const range = getFilterRange(filter, offset);
+  if (!range) return "";
+  if (filter === "week") return `${format(range.start, "MMM d")}–${format(range.end, "MMM d, yyyy")}`;
+  if (filter === "month") return format(range.start, "MMMM yyyy");
+  if (filter === "year") return format(range.start, "yyyy");
+  return "";
 }
 
 export default function MachineDetail() {
@@ -57,6 +75,7 @@ export default function MachineDetail() {
   const [machineSkus, setMachineSkus] = useState<MachineSKU[]>([]);
   const [loading, setLoading] = useState(true);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("lifetime");
+  const [periodOffset, setPeriodOffset] = useState(0);
 
   // Log sales dialog
   const [logOpen, setLogOpen] = useState(false);
@@ -65,11 +84,20 @@ export default function MachineDetail() {
   const [logCredit, setLogCredit] = useState("");
   const [logSaving, setLogSaving] = useState(false);
 
+  // Edit sale dialog
+  const [editSale, setEditSale] = useState<MachineSale | null>(null);
+  const [editDate, setEditDate] = useState("");
+  const [editCash, setEditCash] = useState("");
+  const [editCredit, setEditCredit] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+
   // Add SKU dialog
   const [skuOpen, setSkuOpen] = useState(false);
   const [skuSearch, setSkuSearch] = useState("");
   const [allSkus, setAllSkus] = useState<Pick<Tables<"skus">, "id" | "sku_name">[]>([]);
   const [skuLoading, setSkuLoading] = useState(false);
+
+  useEffect(() => { setPeriodOffset(0); }, [timeFilter]);
 
   const fetchData = async () => {
     if (!user || !id) return;
@@ -87,10 +115,11 @@ export default function MachineDetail() {
 
   useEffect(() => { fetchData(); }, [user, id]);
 
-  const filterStart = getFilterStart(timeFilter);
+  const range = getFilterRange(timeFilter, periodOffset);
   const filteredSales = sales.filter((s) => {
-    if (!filterStart) return true;
-    return isAfter(new Date(s.date), filterStart);
+    if (!range) return true;
+    const d = new Date(s.date);
+    return !isBefore(d, range.start) && !isAfter(d, range.end);
   });
 
   const totalCash = filteredSales.reduce((s, e) => s + Number(e.cash_amount), 0);
@@ -98,15 +127,6 @@ export default function MachineDetail() {
   const totalRevenue = totalCash + totalCredit;
   const cashPct = totalRevenue > 0 ? Math.round((totalCash / totalRevenue) * 100) : 0;
   const creditPct = totalRevenue > 0 ? 100 - cashPct : 0;
-
-  // Estimate profit: average margin from linked SKUs applied to revenue
-  const avgMargin = useMemo(() => {
-    const skusWithPrice = machineSkus.filter((ms) => ms.skus?.sell_price && ms.skus.sell_price > 0);
-    if (skusWithPrice.length === 0) return null;
-    // Simple: use sell_price as revenue proxy. We'd need cost data for real margin.
-    // For now, show revenue as a baseline with no cost deduction since we don't have per-machine cost data
-    return null;
-  }, [machineSkus]);
 
   // Warning: no sales in 7 days
   const lastSaleDate = sales.length > 0 ? new Date(sales[0].date) : null;
@@ -134,15 +154,53 @@ export default function MachineDetail() {
     }
   };
 
+  const openEditSale = (sale: MachineSale) => {
+    setEditSale(sale);
+    setEditDate(sale.date);
+    setEditCash(String(sale.cash_amount));
+    setEditCredit(String(sale.credit_amount));
+  };
+
+  const handleEditSave = async () => {
+    if (!editSale) return;
+    setEditSaving(true);
+    const { error } = await supabase.from("machine_sales").update({
+      date: editDate,
+      cash_amount: parseFloat(editCash) || 0,
+      credit_amount: parseFloat(editCredit) || 0,
+    }).eq("id", editSale.id);
+    setEditSaving(false);
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Sale updated" });
+      setEditSale(null);
+      fetchData();
+    }
+  };
+
+  const handleEditDelete = async () => {
+    if (!editSale) return;
+    setEditSaving(true);
+    const { error } = await supabase.from("machine_sales").delete().eq("id", editSale.id);
+    setEditSaving(false);
+    if (error) {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    } else {
+      toast({ title: "Sale deleted" });
+      setEditSale(null);
+      fetchData();
+    }
+  };
+
   const handleSearchSkus = async () => {
     if (!user) return;
     setSkuLoading(true);
-    const { data } = await supabase
-      .from("skus")
-      .select("id, sku_name")
-      .eq("user_id", user.id)
-      .ilike("sku_name", `%${skuSearch}%`)
-      .limit(20);
+    let query = supabase.from("skus").select("id, sku_name").eq("user_id", user.id).limit(100);
+    if (skuSearch.trim()) {
+      query = query.ilike("sku_name", `%${skuSearch}%`);
+    }
+    const { data } = await query;
     setAllSkus(data || []);
     setSkuLoading(false);
   };
@@ -191,6 +249,8 @@ export default function MachineDetail() {
     a.click();
     URL.revokeObjectURL(url);
   };
+
+  const showNavigation = timeFilter !== "lifetime";
 
   if (loading) return <div className="flex items-center justify-center min-h-screen text-muted-foreground">Loading...</div>;
   if (!machine) return <div className="flex items-center justify-center min-h-screen text-muted-foreground">Machine not found</div>;
@@ -241,6 +301,20 @@ export default function MachineDetail() {
               ))}
             </div>
           </div>
+          {/* Period Navigation */}
+          {showNavigation && (
+            <div className="flex items-center justify-center gap-2 pt-2">
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setPeriodOffset(o => o - 1)}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-xs font-medium min-w-[140px] text-center">
+                {getPeriodLabel(timeFilter, periodOffset)}
+              </span>
+              <Button variant="ghost" size="icon" className="h-7 w-7" disabled={periodOffset >= 0} onClick={() => setPeriodOffset(o => o + 1)}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
         </CardHeader>
         <CardContent className="px-4 pb-4 space-y-3">
           <div className="grid grid-cols-3 gap-3">
@@ -289,12 +363,16 @@ export default function MachineDetail() {
           {sales.length === 0 ? (
             <p className="text-xs text-muted-foreground text-center py-4">No sales entries yet.</p>
           ) : (
-            <ScrollArea className="max-h-60">
-              <div className="space-y-2">
+            <ScrollArea className="h-60">
+              <div className="space-y-2 pr-3">
                 {sales.map((s) => {
                   const total = Number(s.cash_amount) + Number(s.credit_amount);
                   return (
-                    <div key={s.id} className="flex items-center justify-between py-1.5 border-b border-border last:border-0">
+                    <button
+                      key={s.id}
+                      onClick={() => openEditSale(s)}
+                      className="w-full flex items-center justify-between py-1.5 border-b border-border last:border-0 text-left hover:bg-muted/50 rounded px-1 transition-colors"
+                    >
                       <div>
                         <p className="text-xs font-medium">{format(new Date(s.date), "MMM d, yyyy")}</p>
                         <p className="text-xs text-muted-foreground">
@@ -302,7 +380,7 @@ export default function MachineDetail() {
                         </p>
                       </div>
                       <p className="text-sm font-semibold">${total.toFixed(2)}</p>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -325,31 +403,33 @@ export default function MachineDetail() {
           {machineSkus.length === 0 ? (
             <p className="text-xs text-muted-foreground text-center py-4">No products linked yet.</p>
           ) : (
-            <div className="space-y-2">
-              {machineSkus.map((ms) => (
-                <div key={ms.id} className="flex items-center justify-between py-1.5 border-b border-border last:border-0">
-                  <button
-                    onClick={() => openSKUDetail(ms.sku_id)}
-                    className="text-xs font-medium text-left cursor-pointer underline decoration-dotted underline-offset-2 hover:text-primary"
-                  >
-                    {ms.skus?.sku_name || "Unknown SKU"}
-                  </button>
-                  <div className="flex items-center gap-2">
-                    {ms.skus?.sell_price && (
-                      <Badge variant="secondary" className="text-xs">${Number(ms.skus.sell_price).toFixed(2)}</Badge>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6 text-destructive"
-                      onClick={() => handleRemoveSku(ms.id)}
+            <ScrollArea className="h-48">
+              <div className="space-y-2 pr-3">
+                {machineSkus.map((ms) => (
+                  <div key={ms.id} className="flex items-center justify-between py-1.5 border-b border-border last:border-0">
+                    <button
+                      onClick={() => openSKUDetail(ms.sku_id)}
+                      className="text-xs font-medium text-left cursor-pointer underline decoration-dotted underline-offset-2 hover:text-primary"
                     >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
+                      {ms.skus?.sku_name || "Unknown SKU"}
+                    </button>
+                    <div className="flex items-center gap-2">
+                      {ms.skus?.sell_price && (
+                        <Badge variant="secondary" className="text-xs">${Number(ms.skus.sell_price).toFixed(2)}</Badge>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-destructive"
+                        onClick={() => handleRemoveSku(ms.id)}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            </ScrollArea>
           )}
         </CardContent>
       </Card>
@@ -382,6 +462,37 @@ export default function MachineDetail() {
         </DialogContent>
       </Dialog>
 
+      {/* Edit Sale Dialog */}
+      <Dialog open={!!editSale} onOpenChange={(open) => { if (!open) setEditSale(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Sale</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div>
+              <Label>Date</Label>
+              <Input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} />
+            </div>
+            <div>
+              <Label>Cash Amount ($)</Label>
+              <Input type="number" step="0.01" min="0" value={editCash} onChange={(e) => setEditCash(e.target.value)} placeholder="0.00" />
+            </div>
+            <div>
+              <Label>Credit Amount ($)</Label>
+              <Input type="number" step="0.01" min="0" value={editCredit} onChange={(e) => setEditCredit(e.target.value)} placeholder="0.00" />
+            </div>
+          </div>
+          <DialogFooter className="flex justify-between sm:justify-between">
+            <Button variant="destructive" onClick={handleEditDelete} disabled={editSaving}>
+              <Trash2 className="h-4 w-4 mr-1" /> Delete
+            </Button>
+            <Button onClick={handleEditSave} disabled={editSaving}>
+              {editSaving ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Add SKU Dialog */}
       <Dialog open={skuOpen} onOpenChange={setSkuOpen}>
         <DialogContent>
@@ -398,10 +509,10 @@ export default function MachineDetail() {
                 onChange={(e) => setSkuSearch(e.target.value)}
               />
             </div>
-            <ScrollArea className="max-h-60">
-              <div className="space-y-1">
+            <ScrollArea className="h-72">
+              <div className="space-y-1 pr-3">
                 {skuLoading ? (
-                  <p className="text-xs text-muted-foreground text-center py-4">Searching...</p>
+                  <p className="text-xs text-muted-foreground text-center py-4">Loading...</p>
                 ) : allSkus.length === 0 ? (
                   <p className="text-xs text-muted-foreground text-center py-4">No SKUs found</p>
                 ) : (
