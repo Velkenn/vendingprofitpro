@@ -1,40 +1,68 @@
 
 
-## Add Navigation for Past Weeks/Months/Years on Stats and Machines Tabs
+## Period Navigation + Machine Detail Fixes
 
-### Problem
-Currently "Week" shows only the current week, "Month" only the current month, and "Year" only the current year. Users cannot navigate to previous periods (e.g. last week, two months ago).
+### 1. Add period navigation arrows to Stats, Machines, and MachineDetail
 
-### Solution
-Add left/right arrow buttons flanking the time filter so users can step backward and forward through periods. When a relative filter (Week/Month/Year) is selected, show the period label (e.g. "Mar 23–29, 2026") with `‹` and `›` arrows to navigate. The right arrow is disabled when viewing the current period.
+Add a `periodOffset` state (default 0, negative = past) to all three pages. When Week/Month/Year is selected, show a row below the filter buttons with left/right chevron arrows and a label showing the period (e.g. "Mar 23–29, 2026" for week, "March 2026" for month, "2025" for year). Hidden for Lifetime and quarter filters.
 
-### Changes
+**Files changed:** `src/pages/Stats.tsx`, `src/pages/Machines.tsx`, `src/pages/MachineDetail.tsx`
 
-**File: `src/pages/Stats.tsx`**
+- Import `ChevronLeft`, `ChevronRight` from lucide and `subWeeks`, `subMonths`, `subYears`, `endOfWeek`, `endOfMonth`, `endOfYear` from date-fns
+- Add `periodOffset` state, reset to 0 when `timeFilter` changes
+- Update date range computation: shift start/end by offset using `subWeeks(now, -offset)` etc.
+- Render navigation row: `‹  Mar 23–29, 2026  ›` with right arrow disabled at offset 0
 
-1. Add a `periodOffset` state (number, default 0; negative = past periods)
-2. Reset `periodOffset` to 0 when `timeFilter` changes
-3. Update `getFilteredItems` to shift the date window by `periodOffset` weeks/months/years using `subWeeks`, `subMonths`, `subYears` from date-fns
-4. Render a navigation row below the filter buttons: `‹ [period label] ›`
-   - Label shows the date range (e.g. "Mar 23–29" for week, "March 2026" for month, "2025" for year)
-   - Left arrow decrements offset, right arrow increments (capped at 0)
-   - Hidden when filter is "lifetime" or a quarter
+### 2. Tappable sales entries with edit/delete dialog (MachineDetail)
 
-**File: `src/pages/Machines.tsx`**
+**File:** `src/pages/MachineDetail.tsx`
 
-1. Same pattern: add `periodOffset` state, reset on filter change
-2. Update `getFilterStart` to accept an offset and compute the shifted start/end dates
-3. Add the same `‹ [period label] ›` navigation row below the filter buttons
-4. Hidden when filter is "lifetime"
+- Add state for editing: `editSale` (the sale being edited or null), `editDate`, `editCash`, `editCredit`, `editSaving`
+- Make each sales history row a clickable button that sets `editSale` and pre-fills the edit fields
+- Add a new Dialog for editing with Save and Delete buttons
+- Save calls `supabase.from("machine_sales").update(...)` filtered by sale id
+- Delete calls `supabase.from("machine_sales").delete()` filtered by sale id
+- Both refresh data and close dialog on success
 
-**File: `src/pages/MachineDetail.tsx`**
+### 3. Add Product modal loads all SKUs by default (MachineDetail)
 
-Same changes as Machines.tsx — add period offset navigation to the detail page's time filter.
+**File:** `src/pages/MachineDetail.tsx`
 
-### UI Layout
-```text
-[ Week ] [ Month ] [ Year ] [ Lifetime ]
-      ‹  Mar 23–29, 2026  ›
+- Change `handleSearchSkus` to fetch up to 100 SKUs (increase limit from 20)
+- Load SKUs immediately when dialog opens (already does this via useEffect)
+- Change `ScrollArea` to use `h-72` (fixed height) instead of `max-h-60` so it's always scrollable
+- Search box stays, just filters the already-fetched list
+
+### 4. Independent scrolling for Sales History and Products cards (MachineDetail)
+
+**File:** `src/pages/MachineDetail.tsx`
+
+- Sales History: wrap content in `ScrollArea` with `className="h-60"` (fixed height, always scrollable)
+- Products in this Machine: wrap content in `ScrollArea` with `className="h-48"` (fixed height, always scrollable)
+- Both already use or will use `ScrollArea`; just switch from `max-h-*` to fixed `h-*` so they get independent scroll containers
+
+### Technical details
+
+**Period label formatting:**
+- Week: `format(weekStart, "MMM d") + "–" + format(weekEnd, "MMM d, yyyy")`
+- Month: `format(monthStart, "MMMM yyyy")`
+- Year: `format(yearStart, "yyyy")`
+
+**Date range with offset (shared pattern):**
+```typescript
+const [periodOffset, setPeriodOffset] = useState(0);
+// Reset on filter change
+useEffect(() => setPeriodOffset(0), [timeFilter]);
+
+function getFilterRange(filter, offset) {
+  const now = new Date();
+  if (filter === "week") {
+    const base = subWeeks(startOfWeek(now), -offset);
+    return { start: base, end: endOfWeek(base) };
+  }
+  // similar for month/year
+}
 ```
-Arrows are small icon buttons using `ChevronLeft` / `ChevronRight` from lucide. The label is centered between them.
+
+**Edit sale dialog fields:** reuses same Input components as the Log Sale dialog, plus a red Delete button in the footer.
 
