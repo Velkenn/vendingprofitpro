@@ -4,11 +4,12 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { BarChart3, Package, DollarSign, TrendingUp, Store } from "lucide-react";
+import { BarChart3, Package, DollarSign, TrendingUp, Store, ChevronLeft, ChevronRight } from "lucide-react";
 import { useSKUDetail } from "@/contexts/SKUDetailContext";
 import type { Tables } from "@/integrations/supabase/types";
-import { startOfWeek, startOfMonth, startOfYear, isAfter, isBefore } from "date-fns";
+import { startOfWeek, startOfMonth, startOfYear, endOfWeek, endOfMonth, endOfYear, isAfter, isBefore, subWeeks, subMonths, subYears, format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 type ReceiptItemWithJoins = Tables<"receipt_items"> & {
   skus: Pick<Tables<"skus">, "sku_name" | "sell_price"> | null;
@@ -47,6 +48,9 @@ export default function Stats() {
   const [items, setItems] = useState<ReceiptItemWithJoins[]>([]);
   const [loading, setLoading] = useState(true);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("lifetime");
+  const [periodOffset, setPeriodOffset] = useState(0);
+
+  useEffect(() => { setPeriodOffset(0); }, [timeFilter]);
 
   useEffect(() => {
     if (!user) return;
@@ -65,43 +69,61 @@ export default function Stats() {
       });
   }, [user]);
 
-  const getFilteredItems = (filter: TimeFilter): ReceiptItemWithJoins[] => {
-    if (filter === "lifetime") return items;
-    
+  const getFilterRange = (filter: TimeFilter, offset: number): { start: Date; end: Date } | null => {
+    if (filter === "lifetime") return null;
     const now = new Date();
     const currentYear = now.getFullYear();
 
     if (filter.startsWith("q")) {
       const quarterMap: Record<string, [number, number]> = {
-        q1: [0, 2],  // Jan-Mar
-        q2: [3, 5],  // Apr-Jun
-        q3: [6, 8],  // Jul-Sep
-        q4: [9, 11], // Oct-Dec
+        q1: [0, 2],
+        q2: [3, 5],
+        q3: [6, 8],
+        q4: [9, 11],
       };
       const [startMonth, endMonth] = quarterMap[filter];
       const start = new Date(currentYear, startMonth, 1);
       const end = new Date(currentYear, endMonth + 1, 0, 23, 59, 59);
-      
-      return items.filter(item => {
-        const d = new Date(item.receipts.receipt_date);
-        return !isBefore(d, start) && !isAfter(d, end);
-      });
+      return { start, end };
     }
 
-    let cutoff: Date;
-    switch (filter) {
-      case "week":
-        cutoff = startOfWeek(now, { weekStartsOn: 0 });
-        break;
-      case "month":
-        cutoff = startOfMonth(now);
-        break;
-      case "year":
-        cutoff = startOfYear(now);
-        break;
+    if (filter === "week") {
+      const base = subWeeks(startOfWeek(now, { weekStartsOn: 0 }), -offset);
+      return { start: base, end: endOfWeek(base, { weekStartsOn: 0 }) };
     }
-    
-    return items.filter(item => isAfter(new Date(item.receipts.receipt_date), cutoff));
+    if (filter === "month") {
+      const base = subMonths(startOfMonth(now), -offset);
+      return { start: base, end: endOfMonth(base) };
+    }
+    if (filter === "year") {
+      const base = subYears(startOfYear(now), -offset);
+      return { start: base, end: endOfYear(base) };
+    }
+    return null;
+  };
+
+  const getPeriodLabel = (filter: TimeFilter, offset: number): string => {
+    const range = getFilterRange(filter, offset);
+    if (!range) return "";
+    if (filter === "week") {
+      return `${format(range.start, "MMM d")}–${format(range.end, "MMM d, yyyy")}`;
+    }
+    if (filter === "month") {
+      return format(range.start, "MMMM yyyy");
+    }
+    if (filter === "year") {
+      return format(range.start, "yyyy");
+    }
+    return "";
+  };
+
+  const getFilteredItems = (): ReceiptItemWithJoins[] => {
+    const range = getFilterRange(timeFilter, periodOffset);
+    if (!range) return items;
+    return items.filter(item => {
+      const d = new Date(item.receipts.receipt_date);
+      return !isBefore(d, range.start) && !isAfter(d, range.end);
+    });
   };
 
   const calculateSkuStats = (filteredItems: ReceiptItemWithJoins[]): SkuStats[] => {
@@ -184,10 +206,11 @@ export default function Stats() {
     );
   }
 
-  const filteredItems = getFilteredItems(timeFilter);
+  const filteredItems = getFilteredItems();
   const skuStats = calculateSkuStats(filteredItems);
   const metrics = calculateBusinessMetrics(filteredItems);
   const storeSpend = calculateStoreSpend(filteredItems);
+  const showNavigation = !["lifetime", "q1", "q2", "q3", "q4"].includes(timeFilter);
 
   const timeButtons: { value: TimeFilter; label: string }[] = [
     { value: "week", label: "Week" },
@@ -244,6 +267,20 @@ export default function Stats() {
             </button>
           ))}
         </div>
+        {/* Period Navigation */}
+        {showNavigation && (
+          <div className="flex items-center justify-center gap-2">
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setPeriodOffset(o => o - 1)}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-sm font-medium min-w-[160px] text-center">
+              {getPeriodLabel(timeFilter, periodOffset)}
+            </span>
+            <Button variant="ghost" size="icon" className="h-8 w-8" disabled={periodOffset >= 0} onClick={() => setPeriodOffset(o => o + 1)}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Summary Cards */}

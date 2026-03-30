@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { DollarSign, Plus, MapPin, CreditCard, Banknote, TrendingUp } from "lucide-react";
-import { startOfWeek, startOfMonth, startOfYear, isAfter } from "date-fns";
+import { DollarSign, Plus, MapPin, CreditCard, Banknote, ChevronLeft, ChevronRight } from "lucide-react";
+import { startOfWeek, startOfMonth, startOfYear, endOfWeek, endOfMonth, endOfYear, isAfter, isBefore, subWeeks, subMonths, subYears, format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 
@@ -36,12 +36,30 @@ const TIME_FILTERS: { value: TimeFilter; label: string }[] = [
   { value: "lifetime", label: "Lifetime" },
 ];
 
-function getFilterStart(filter: TimeFilter): Date | null {
+function getFilterRange(filter: TimeFilter, offset: number): { start: Date; end: Date } | null {
   const now = new Date();
-  if (filter === "week") return startOfWeek(now, { weekStartsOn: 0 });
-  if (filter === "month") return startOfMonth(now);
-  if (filter === "year") return startOfYear(now);
+  if (filter === "week") {
+    const base = subWeeks(startOfWeek(now, { weekStartsOn: 0 }), -offset);
+    return { start: base, end: endOfWeek(base, { weekStartsOn: 0 }) };
+  }
+  if (filter === "month") {
+    const base = subMonths(startOfMonth(now), -offset);
+    return { start: base, end: endOfMonth(base) };
+  }
+  if (filter === "year") {
+    const base = subYears(startOfYear(now), -offset);
+    return { start: base, end: endOfYear(base) };
+  }
   return null;
+}
+
+function getPeriodLabel(filter: TimeFilter, offset: number): string {
+  const range = getFilterRange(filter, offset);
+  if (!range) return "";
+  if (filter === "week") return `${format(range.start, "MMM d")}–${format(range.end, "MMM d, yyyy")}`;
+  if (filter === "month") return format(range.start, "MMMM yyyy");
+  if (filter === "year") return format(range.start, "yyyy");
+  return "";
 }
 
 export default function Machines() {
@@ -51,10 +69,13 @@ export default function Machines() {
   const [sales, setSales] = useState<MachineSale[]>([]);
   const [loading, setLoading] = useState(true);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("lifetime");
+  const [periodOffset, setPeriodOffset] = useState(0);
   const [addOpen, setAddOpen] = useState(false);
   const [newName, setNewName] = useState("");
   const [newLocation, setNewLocation] = useState("");
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => { setPeriodOffset(0); }, [timeFilter]);
 
   const fetchData = async () => {
     if (!user) return;
@@ -70,25 +91,23 @@ export default function Machines() {
 
   useEffect(() => { fetchData(); }, [user]);
 
-  const filterStart = getFilterStart(timeFilter);
+  const range = getFilterRange(timeFilter, periodOffset);
 
   const filteredSales = sales.filter((s) => {
-    if (!filterStart) return true;
-    return isAfter(new Date(s.date), filterStart);
+    if (!range) return true;
+    const d = new Date(s.date);
+    return !isBefore(d, range.start) && !isAfter(d, range.end);
   });
 
   const totalCash = filteredSales.reduce((s, e) => s + Number(e.cash_amount), 0);
   const totalCredit = filteredSales.reduce((s, e) => s + Number(e.credit_amount), 0);
   const totalRevenue = totalCash + totalCredit;
 
-  // Revenue per machine for this week
-  const weekStart = startOfWeek(new Date(), { weekStartsOn: 0 });
-  const weekSalesByMachine = sales
-    .filter((s) => isAfter(new Date(s.date), weekStart))
-    .reduce<Record<string, number>>((acc, s) => {
-      acc[s.machine_id] = (acc[s.machine_id] || 0) + Number(s.cash_amount) + Number(s.credit_amount);
-      return acc;
-    }, {});
+  // Revenue per machine for the current filtered period
+  const revByMachine = filteredSales.reduce<Record<string, number>>((acc, s) => {
+    acc[s.machine_id] = (acc[s.machine_id] || 0) + Number(s.cash_amount) + Number(s.credit_amount);
+    return acc;
+  }, {});
 
   const handleAdd = async () => {
     if (!user || !newName.trim()) return;
@@ -109,6 +128,8 @@ export default function Machines() {
       fetchData();
     }
   };
+
+  const showNavigation = timeFilter !== "lifetime";
 
   return (
     <div className="px-4 pt-6 pb-4 max-w-lg mx-auto space-y-4">
@@ -141,6 +162,20 @@ export default function Machines() {
               ))}
             </div>
           </div>
+          {/* Period Navigation */}
+          {showNavigation && (
+            <div className="flex items-center justify-center gap-2 pt-2">
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setPeriodOffset(o => o - 1)}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-xs font-medium min-w-[140px] text-center">
+                {getPeriodLabel(timeFilter, periodOffset)}
+              </span>
+              <Button variant="ghost" size="icon" className="h-7 w-7" disabled={periodOffset >= 0} onClick={() => setPeriodOffset(o => o + 1)}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
         </CardHeader>
         <CardContent className="px-4 pb-4">
           <div className="grid grid-cols-3 gap-3">
@@ -188,8 +223,8 @@ export default function Machines() {
                   )}
                 </div>
                 <div className="text-right">
-                  <p className="text-xs text-muted-foreground">This week</p>
-                  <p className="text-sm font-semibold">${(weekSalesByMachine[m.id] || 0).toFixed(2)}</p>
+                  <p className="text-xs text-muted-foreground">{timeFilter === "lifetime" ? "All time" : getPeriodLabel(timeFilter, periodOffset)}</p>
+                  <p className="text-sm font-semibold">${(revByMachine[m.id] || 0).toFixed(2)}</p>
                 </div>
               </CardContent>
             </Card>
