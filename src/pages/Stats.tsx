@@ -28,10 +28,17 @@ type SkuStats = {
 
 type BusinessMetrics = {
   total_spend: number;
+  total_revenue: number;
   total_profit: number;
   avg_unit_cost: number;
-  avg_unit_profit: number;
   total_units: number;
+};
+
+type MachineSale = {
+  id: string;
+  date: string;
+  cash_amount: number;
+  credit_amount: number;
 };
 
 type StoreSpend = {
