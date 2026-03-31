@@ -595,6 +595,111 @@ async function parseWithUserProvider(
   throw new Error(`Unknown provider: ${provider}`);
 }
 
+// Normalize raw names using the user's AI
+async function normalizeNamesWithAI(
+  rawNames: string[],
+  provider: string,
+  apiKey: string,
+  model: string
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  if (rawNames.length === 0) return result;
+
+  const prompt = `Normalize these raw receipt product names:\n${rawNames.map((n, i) => `${i + 1}. "${n}"`).join("\n")}`;
+
+  try {
+    if (provider === "anthropic") {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 4096,
+          system: NORMALIZE_SYSTEM,
+          tools: [{
+            name: "normalize_names",
+            description: NORMALIZE_TOOL.function.description,
+            input_schema: NORMALIZE_TOOL.function.parameters,
+          }],
+          tool_choice: { type: "tool", name: "normalize_names" },
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      if (!res.ok) { console.error("Normalize AI error:", await res.text()); return result; }
+      const data = await res.json();
+      const toolUse = data.content?.find((c: any) => c.type === "tool_use");
+      if (toolUse?.input?.names) {
+        for (const n of toolUse.input.names) {
+          result.set(n.raw_name.toLowerCase(), n.normalized_name);
+        }
+      }
+    } else if (provider === "openai") {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          max_tokens: 4096,
+          messages: [
+            { role: "system", content: NORMALIZE_SYSTEM },
+            { role: "user", content: prompt },
+          ],
+          tools: [NORMALIZE_TOOL],
+          tool_choice: { type: "function", function: { name: "normalize_names" } },
+        }),
+      });
+      if (!res.ok) { console.error("Normalize AI error:", await res.text()); return result; }
+      const data = await res.json();
+      const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+      if (toolCall) {
+        const parsed = parseToolCallResult(toolCall);
+        if (parsed?.names) {
+          for (const n of parsed.names) {
+            result.set(n.raw_name.toLowerCase(), n.normalized_name);
+          }
+        }
+      }
+    } else if (provider === "google") {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: NORMALIZE_SYSTEM }] },
+            contents: [{ parts: [{ text: prompt }] }],
+            tools: [{
+              functionDeclarations: [{
+                name: "normalize_names",
+                description: NORMALIZE_TOOL.function.description,
+                parameters: NORMALIZE_TOOL.function.parameters,
+              }],
+            }],
+            toolConfig: { functionCallingConfig: { mode: "ANY", allowedFunctionNames: ["normalize_names"] } },
+            generationConfig: { maxOutputTokens: 4096 },
+          }),
+        }
+      );
+      if (!res.ok) { console.error("Normalize AI error:", await res.text()); return result; }
+      const data = await res.json();
+      const fc = data.candidates?.[0]?.content?.parts?.find((p: any) => p.functionCall);
+      if (fc?.functionCall?.args?.names) {
+        for (const n of fc.functionCall.args.names) {
+          result.set(n.raw_name.toLowerCase(), n.normalized_name);
+        }
+      }
+    }
+  } catch (e) {
+    console.error("Name normalization failed:", e);
+  }
+
+  return result;
+}
+
 // Get user's configured AI provider
 async function getUserAIConfig(supabase: any, userId: string, encryptionKey: string) {
   const { data, error } = await supabase
@@ -605,7 +710,6 @@ async function getUserAIConfig(supabase: any, userId: string, encryptionKey: str
     .single();
 
   if (error || !data) {
-    // Try any provider if no default
     const { data: any_provider } = await supabase
       .from("ai_provider_settings")
       .select("provider, encrypted_api_key, model")
@@ -614,7 +718,6 @@ async function getUserAIConfig(supabase: any, userId: string, encryptionKey: str
       .single();
     if (!any_provider) return null;
 
-    // Decrypt key
     const { data: decrypted } = await supabase.rpc("decrypt_ai_key", {
       encrypted_text: any_provider.encrypted_api_key,
       enc_key: encryptionKey,
