@@ -218,8 +218,16 @@ export default function Stats() {
   }
 
   const filteredItems = getFilteredItems();
+  const filteredSales = (() => {
+    const range = getFilterRange(timeFilter, periodOffset);
+    if (!range) return machineSales;
+    return machineSales.filter(s => {
+      const d = new Date(s.date);
+      return !isBefore(d, range.start) && !isAfter(d, range.end);
+    });
+  })();
   const skuStats = calculateSkuStats(filteredItems);
-  const metrics = calculateBusinessMetrics(filteredItems);
+  const metrics = calculateBusinessMetrics(filteredItems, filteredSales);
   const storeSpend = calculateStoreSpend(filteredItems);
   const showNavigation = !["lifetime", "q1", "q2", "q3", "q4"].includes(timeFilter);
 
