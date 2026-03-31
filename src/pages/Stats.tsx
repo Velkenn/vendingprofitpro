@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { BarChart3, Package, DollarSign, TrendingUp, Store, ChevronLeft, ChevronRight } from "lucide-react";
+import { BarChart3, Package, DollarSign, TrendingUp, Store, ChevronLeft, ChevronRight, Banknote } from "lucide-react";
 import { useSKUDetail } from "@/contexts/SKUDetailContext";
 import type { Tables } from "@/integrations/supabase/types";
 import { startOfWeek, startOfMonth, startOfYear, endOfWeek, endOfMonth, endOfYear, isAfter, isBefore, subWeeks, subMonths, subYears, format } from "date-fns";
