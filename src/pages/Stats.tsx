@@ -4,7 +4,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { BarChart3, Package, DollarSign, TrendingUp, Store, ChevronLeft, ChevronRight } from "lucide-react";
+import { BarChart3, Package, DollarSign, TrendingUp, Store, ChevronLeft, ChevronRight, Banknote } from "lucide-react";
 import { useSKUDetail } from "@/contexts/SKUDetailContext";
 import type { Tables } from "@/integrations/supabase/types";
 import { startOfWeek, startOfMonth, startOfYear, endOfWeek, endOfMonth, endOfYear, isAfter, isBefore, subWeeks, subMonths, subYears, format } from "date-fns";
@@ -28,10 +28,17 @@ type SkuStats = {
 
 type BusinessMetrics = {
   total_spend: number;
+  total_revenue: number;
   total_profit: number;
   avg_unit_cost: number;
-  avg_unit_profit: number;
   total_units: number;
+};
+
+type MachineSale = {
+  id: string;
+  date: string;
+  cash_amount: number;
+  credit_amount: number;
 };
 
 type StoreSpend = {
@@ -46,6 +53,7 @@ export default function Stats() {
   const { user } = useAuth();
   const { openSKUDetail } = useSKUDetail();
   const [items, setItems] = useState<ReceiptItemWithJoins[]>([]);
+  const [machineSales, setMachineSales] = useState<MachineSale[]>([]);
   const [loading, setLoading] = useState(true);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("lifetime");
   const [periodOffset, setPeriodOffset] = useState(0);
@@ -55,18 +63,23 @@ export default function Stats() {
   useEffect(() => {
     if (!user) return;
     
-    supabase
-      .from("receipt_items")
-      .select(`
-        *,
-        skus(sku_name, sell_price),
-        receipts!inner(receipt_date, vendor, store_location)
-      `)
-      .eq("is_personal", false)
-      .then(({ data }) => {
-        setItems((data as ReceiptItemWithJoins[]) || []);
-        setLoading(false);
-      });
+    Promise.all([
+      supabase
+        .from("receipt_items")
+        .select(`
+          *,
+          skus(sku_name, sell_price),
+          receipts!inner(receipt_date, vendor, store_location)
+        `)
+        .eq("is_personal", false),
+      supabase
+        .from("machine_sales")
+        .select("id, date, cash_amount, credit_amount")
+    ]).then(([itemsRes, salesRes]) => {
+      setItems((itemsRes.data as ReceiptItemWithJoins[]) || []);
+      setMachineSales((salesRes.data as MachineSale[]) || []);
+      setLoading(false);
+    });
   }, [user]);
 
   const getFilterRange = (filter: TimeFilter, offset: number): { start: Date; end: Date } | null => {
@@ -165,18 +178,16 @@ export default function Stats() {
       .sort((a, b) => b.total_units - a.total_units);
   };
 
-  const calculateBusinessMetrics = (filteredItems: ReceiptItemWithJoins[]): BusinessMetrics => {
-    let total_spend = 0, total_profit = 0, total_units = 0, total_cost = 0;
+  const calculateBusinessMetrics = (filteredItems: ReceiptItemWithJoins[], filteredSales: MachineSale[]): BusinessMetrics => {
+    let total_spend = 0, total_units = 0;
     filteredItems.forEach(item => {
       const units = (item.qty || 1) * (item.pack_size || 1);
-      const unit_cost = item.unit_cost || 0;
-      const sell_price = item.skus?.sell_price || 0;
       total_spend += item.line_total;
       total_units += units;
-      total_cost += unit_cost * units;
-      if (sell_price > 0) total_profit += (sell_price - unit_cost) * units;
     });
-    return { total_spend, total_profit, avg_unit_cost: total_units > 0 ? total_cost / total_units : 0, avg_unit_profit: total_units > 0 ? total_profit / total_units : 0, total_units };
+    const total_revenue = filteredSales.reduce((sum, s) => sum + Number(s.cash_amount) + Number(s.credit_amount), 0);
+    const total_profit = total_revenue - total_spend;
+    return { total_spend, total_revenue, total_profit, avg_unit_cost: total_units > 0 ? total_spend / total_units : 0, total_units };
   };
 
   const calculateStoreSpend = (filteredItems: ReceiptItemWithJoins[]): StoreSpend[] => {
@@ -207,8 +218,16 @@ export default function Stats() {
   }
 
   const filteredItems = getFilteredItems();
+  const filteredSales = (() => {
+    const range = getFilterRange(timeFilter, periodOffset);
+    if (!range) return machineSales;
+    return machineSales.filter(s => {
+      const d = new Date(s.date);
+      return !isBefore(d, range.start) && !isAfter(d, range.end);
+    });
+  })();
   const skuStats = calculateSkuStats(filteredItems);
-  const metrics = calculateBusinessMetrics(filteredItems);
+  const metrics = calculateBusinessMetrics(filteredItems, filteredSales);
   const storeSpend = calculateStoreSpend(filteredItems);
   const showNavigation = !["lifetime", "q1", "q2", "q3", "q4"].includes(timeFilter);
 
@@ -297,12 +316,24 @@ export default function Stats() {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1">
+            <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
+            <Banknote className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent className="p-4 pt-0">
+            <div className="text-2xl font-bold">${metrics.total_revenue.toFixed(2)}</div>
+            <p className="text-xs text-muted-foreground">Machine sales</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1">
             <CardTitle className="text-sm font-medium">Total Profit</CardTitle>
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent className="p-4 pt-0">
-            <div className="text-2xl font-bold">${metrics.total_profit.toFixed(2)}</div>
-            <p className="text-xs text-muted-foreground">Estimated profit</p>
+            <div className={`text-2xl font-bold ${metrics.total_profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {metrics.total_profit >= 0 ? '' : '-'}${Math.abs(metrics.total_profit).toFixed(2)}
+            </div>
+            <p className="text-xs text-muted-foreground">Revenue − spend</p>
           </CardContent>
         </Card>
         <Card>
@@ -313,6 +344,16 @@ export default function Stats() {
           <CardContent className="p-4 pt-0">
             <div className="text-2xl font-bold">${metrics.avg_unit_cost.toFixed(2)}</div>
             <p className="text-xs text-muted-foreground">Per unit purchased</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1">
+            <CardTitle className="text-sm font-medium">Total Units</CardTitle>
+            <Package className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent className="p-4 pt-0">
+            <div className="text-2xl font-bold">{metrics.total_units.toLocaleString()}</div>
+            <p className="text-xs text-muted-foreground">Units purchased</p>
           </CardContent>
         </Card>
         <Card>
