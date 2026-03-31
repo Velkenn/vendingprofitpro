@@ -316,12 +316,24 @@ export default function Stats() {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1">
+            <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
+            <Banknote className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent className="p-4 pt-0">
+            <div className="text-2xl font-bold">${metrics.total_revenue.toFixed(2)}</div>
+            <p className="text-xs text-muted-foreground">Machine sales</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1">
             <CardTitle className="text-sm font-medium">Total Profit</CardTitle>
             <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent className="p-4 pt-0">
-            <div className="text-2xl font-bold">${metrics.total_profit.toFixed(2)}</div>
-            <p className="text-xs text-muted-foreground">Estimated profit</p>
+            <div className={`text-2xl font-bold ${metrics.total_profit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {metrics.total_profit >= 0 ? '' : '-'}${Math.abs(metrics.total_profit).toFixed(2)}
+            </div>
+            <p className="text-xs text-muted-foreground">Revenue − spend</p>
           </CardContent>
         </Card>
         <Card>
@@ -332,6 +344,16 @@ export default function Stats() {
           <CardContent className="p-4 pt-0">
             <div className="text-2xl font-bold">${metrics.avg_unit_cost.toFixed(2)}</div>
             <p className="text-xs text-muted-foreground">Per unit purchased</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1">
+            <CardTitle className="text-sm font-medium">Total Units</CardTitle>
+            <Package className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent className="p-4 pt-0">
+            <div className="text-2xl font-bold">{metrics.total_units.toLocaleString()}</div>
+            <p className="text-xs text-muted-foreground">Units purchased</p>
           </CardContent>
         </Card>
         <Card>
