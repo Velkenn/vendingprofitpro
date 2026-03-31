@@ -53,6 +53,7 @@ export default function Stats() {
   const { user } = useAuth();
   const { openSKUDetail } = useSKUDetail();
   const [items, setItems] = useState<ReceiptItemWithJoins[]>([]);
+  const [machineSales, setMachineSales] = useState<MachineSale[]>([]);
   const [loading, setLoading] = useState(true);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("lifetime");
   const [periodOffset, setPeriodOffset] = useState(0);
@@ -62,18 +63,23 @@ export default function Stats() {
   useEffect(() => {
     if (!user) return;
     
-    supabase
-      .from("receipt_items")
-      .select(`
-        *,
-        skus(sku_name, sell_price),
-        receipts!inner(receipt_date, vendor, store_location)
-      `)
-      .eq("is_personal", false)
-      .then(({ data }) => {
-        setItems((data as ReceiptItemWithJoins[]) || []);
-        setLoading(false);
-      });
+    Promise.all([
+      supabase
+        .from("receipt_items")
+        .select(`
+          *,
+          skus(sku_name, sell_price),
+          receipts!inner(receipt_date, vendor, store_location)
+        `)
+        .eq("is_personal", false),
+      supabase
+        .from("machine_sales")
+        .select("id, date, cash_amount, credit_amount")
+    ]).then(([itemsRes, salesRes]) => {
+      setItems((itemsRes.data as ReceiptItemWithJoins[]) || []);
+      setMachineSales((salesRes.data as MachineSale[]) || []);
+      setLoading(false);
+    });
   }, [user]);
 
   const getFilterRange = (filter: TimeFilter, offset: number): { start: Date; end: Date } | null => {
