@@ -1,68 +1,26 @@
 
 
-## Period Navigation + Machine Detail Fixes
+## Fix Avg Unit Cost Calculation and Revenue-Based Profit
 
-### 1. Add period navigation arrows to Stats, Machines, and MachineDetail
+### Problem 1: Avg Unit Cost is wrong
+The current calculation on line 176-179 computes `total_cost = unit_cost * units` then divides by total units. This is unreliable because `unit_cost` can be null/0 or inconsistent with `line_total`. The correct approach (already used in SKU stats on line 161) is simply `total_spend / total_units` — divide what you actually paid by how many units you got.
 
-Add a `periodOffset` state (default 0, negative = past) to all three pages. When Week/Month/Year is selected, show a row below the filter buttons with left/right chevron arrows and a label showing the period (e.g. "Mar 23–29, 2026" for week, "March 2026" for month, "2025" for year). Hidden for Lifetime and quarter filters.
+**Fix in `src/pages/Stats.tsx`:**
+- Change `avg_unit_cost` in `calculateBusinessMetrics` to use `total_spend / total_units` instead of `total_cost / total_units`
+- Remove the separate `total_cost` accumulator since it's no longer needed
 
-**Files changed:** `src/pages/Stats.tsx`, `src/pages/Machines.tsx`, `src/pages/MachineDetail.tsx`
+### Problem 2: Profit should use actual machine sales revenue
+Now that users log actual sales via Machines, profit should be: **total machine revenue (cash + credit) minus total spend on purchases** — not the old sell_price-based estimate.
 
-- Import `ChevronLeft`, `ChevronRight` from lucide and `subWeeks`, `subMonths`, `subYears`, `endOfWeek`, `endOfMonth`, `endOfYear` from date-fns
-- Add `periodOffset` state, reset to 0 when `timeFilter` changes
-- Update date range computation: shift start/end by offset using `subWeeks(now, -offset)` etc.
-- Render navigation row: `‹  Mar 23–29, 2026  ›` with right arrow disabled at offset 0
+**Changes in `src/pages/Stats.tsx`:**
+- Fetch all `machine_sales` for the user on mount (same pattern as receipt_items fetch)
+- Filter machine_sales by the same time range as receipt_items
+- Calculate total revenue = sum of `cash_amount + credit_amount` from filtered machine_sales
+- Profit = total revenue - total spend
+- Update the "Total Profit" card to show this actual profit
+- Add a "Total Revenue" card (replace or supplement existing cards) showing machine revenue
+- Update the SKU-level `profit_per_unit` to still use sell_price since that's per-SKU, but the top-level "Total Profit" uses real revenue
 
-### 2. Tappable sales entries with edit/delete dialog (MachineDetail)
-
-**File:** `src/pages/MachineDetail.tsx`
-
-- Add state for editing: `editSale` (the sale being edited or null), `editDate`, `editCash`, `editCredit`, `editSaving`
-- Make each sales history row a clickable button that sets `editSale` and pre-fills the edit fields
-- Add a new Dialog for editing with Save and Delete buttons
-- Save calls `supabase.from("machine_sales").update(...)` filtered by sale id
-- Delete calls `supabase.from("machine_sales").delete()` filtered by sale id
-- Both refresh data and close dialog on success
-
-### 3. Add Product modal loads all SKUs by default (MachineDetail)
-
-**File:** `src/pages/MachineDetail.tsx`
-
-- Change `handleSearchSkus` to fetch up to 100 SKUs (increase limit from 20)
-- Load SKUs immediately when dialog opens (already does this via useEffect)
-- Change `ScrollArea` to use `h-72` (fixed height) instead of `max-h-60` so it's always scrollable
-- Search box stays, just filters the already-fetched list
-
-### 4. Independent scrolling for Sales History and Products cards (MachineDetail)
-
-**File:** `src/pages/MachineDetail.tsx`
-
-- Sales History: wrap content in `ScrollArea` with `className="h-60"` (fixed height, always scrollable)
-- Products in this Machine: wrap content in `ScrollArea` with `className="h-48"` (fixed height, always scrollable)
-- Both already use or will use `ScrollArea`; just switch from `max-h-*` to fixed `h-*` so they get independent scroll containers
-
-### Technical details
-
-**Period label formatting:**
-- Week: `format(weekStart, "MMM d") + "–" + format(weekEnd, "MMM d, yyyy")`
-- Month: `format(monthStart, "MMMM yyyy")`
-- Year: `format(yearStart, "yyyy")`
-
-**Date range with offset (shared pattern):**
-```typescript
-const [periodOffset, setPeriodOffset] = useState(0);
-// Reset on filter change
-useEffect(() => setPeriodOffset(0), [timeFilter]);
-
-function getFilterRange(filter, offset) {
-  const now = new Date();
-  if (filter === "week") {
-    const base = subWeeks(startOfWeek(now), -offset);
-    return { start: base, end: endOfWeek(base) };
-  }
-  // similar for month/year
-}
-```
-
-**Edit sale dialog fields:** reuses same Input components as the Log Sale dialog, plus a red Delete button in the footer.
+### Summary of changes
+- **`src/pages/Stats.tsx`**: Fix avg_unit_cost formula, fetch machine_sales, compute profit as revenue minus spend
 
