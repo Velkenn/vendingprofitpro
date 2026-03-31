@@ -434,6 +434,45 @@ CRITICAL: You MUST extract EVERY item from the text. Count carefully and do not 
 Compute unit_cost = line_total / (qty * pack_size) if pack size exists, else line_total / qty.
 For normalized names, use format: {Brand/Product} – {Flavor/Variant}`;
 
+const NORMALIZE_TOOL = {
+  type: "function",
+  function: {
+    name: "normalize_names",
+    description: "Return normalized product names for a batch of raw receipt item names",
+    parameters: {
+      type: "object",
+      properties: {
+        names: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              raw_name: { type: "string" },
+              normalized_name: { type: "string" },
+            },
+            required: ["raw_name", "normalized_name"],
+          },
+        },
+      },
+      required: ["names"],
+    },
+  },
+};
+
+const NORMALIZE_SYSTEM = `You normalize raw receipt product names into clean, short, consistent Title Case names.
+Rules:
+- Keep the brand name and key product identifier (flavor/variant) intact
+- Strip pack sizes, weights, counts, UPCs, and redundant descriptors
+- Use proper capitalization and punctuation (e.g. Smucker's not SMUCKERS)
+- Keep names short but distinct so different variants of the same brand are distinguishable
+- Examples:
+  "SMUCKERS UNCRUSTABLES PB&J SANDWICH 2PK" → "Smucker's Uncrustables PB&J"
+  "SMUCKERS UNCRUSTABLES GRAPE 2PK" → "Smucker's Uncrustables Grape"
+  "MONSTER ENRGY ZERO ULT 12PK 16OZ" → "Monster Energy Zero Ultra"
+  "GV 2% REDUCED FAT MILK GAL" → "Great Value 2% Milk"
+  "TIDE PODS ORIG 42CT" → "Tide Pods Original"
+Return a normalized_name for every raw_name provided.`;
+
 function buildUserPrompt(rawText: string): string {
   return `Here is the complete raw text extracted from ALL pages of the receipt:\n\n${rawText}\n\nParse ALL items from this text. Extract every single line item.`;
 }
