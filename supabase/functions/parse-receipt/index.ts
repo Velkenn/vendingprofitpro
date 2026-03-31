@@ -434,6 +434,45 @@ CRITICAL: You MUST extract EVERY item from the text. Count carefully and do not 
 Compute unit_cost = line_total / (qty * pack_size) if pack size exists, else line_total / qty.
 For normalized names, use format: {Brand/Product} – {Flavor/Variant}`;
 
+const NORMALIZE_TOOL = {
+  type: "function",
+  function: {
+    name: "normalize_names",
+    description: "Return normalized product names for a batch of raw receipt item names",
+    parameters: {
+      type: "object",
+      properties: {
+        names: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              raw_name: { type: "string" },
+              normalized_name: { type: "string" },
+            },
+            required: ["raw_name", "normalized_name"],
+          },
+        },
+      },
+      required: ["names"],
+    },
+  },
+};
+
+const NORMALIZE_SYSTEM = `You normalize raw receipt product names into clean, short, consistent Title Case names.
+Rules:
+- Keep the brand name and key product identifier (flavor/variant) intact
+- Strip pack sizes, weights, counts, UPCs, and redundant descriptors
+- Use proper capitalization and punctuation (e.g. Smucker's not SMUCKERS)
+- Keep names short but distinct so different variants of the same brand are distinguishable
+- Examples:
+  "SMUCKERS UNCRUSTABLES PB&J SANDWICH 2PK" → "Smucker's Uncrustables PB&J"
+  "SMUCKERS UNCRUSTABLES GRAPE 2PK" → "Smucker's Uncrustables Grape"
+  "MONSTER ENRGY ZERO ULT 12PK 16OZ" → "Monster Energy Zero Ultra"
+  "GV 2% REDUCED FAT MILK GAL" → "Great Value 2% Milk"
+  "TIDE PODS ORIG 42CT" → "Tide Pods Original"
+Return a normalized_name for every raw_name provided.`;
+
 function buildUserPrompt(rawText: string): string {
   return `Here is the complete raw text extracted from ALL pages of the receipt:\n\n${rawText}\n\nParse ALL items from this text. Extract every single line item.`;
 }
@@ -556,6 +595,111 @@ async function parseWithUserProvider(
   throw new Error(`Unknown provider: ${provider}`);
 }
 
+// Normalize raw names using the user's AI
+async function normalizeNamesWithAI(
+  rawNames: string[],
+  provider: string,
+  apiKey: string,
+  model: string
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  if (rawNames.length === 0) return result;
+
+  const prompt = `Normalize these raw receipt product names:\n${rawNames.map((n, i) => `${i + 1}. "${n}"`).join("\n")}`;
+
+  try {
+    if (provider === "anthropic") {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 4096,
+          system: NORMALIZE_SYSTEM,
+          tools: [{
+            name: "normalize_names",
+            description: NORMALIZE_TOOL.function.description,
+            input_schema: NORMALIZE_TOOL.function.parameters,
+          }],
+          tool_choice: { type: "tool", name: "normalize_names" },
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+      if (!res.ok) { console.error("Normalize AI error:", await res.text()); return result; }
+      const data = await res.json();
+      const toolUse = data.content?.find((c: any) => c.type === "tool_use");
+      if (toolUse?.input?.names) {
+        for (const n of toolUse.input.names) {
+          result.set(n.raw_name.toLowerCase(), n.normalized_name);
+        }
+      }
+    } else if (provider === "openai") {
+      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          max_tokens: 4096,
+          messages: [
+            { role: "system", content: NORMALIZE_SYSTEM },
+            { role: "user", content: prompt },
+          ],
+          tools: [NORMALIZE_TOOL],
+          tool_choice: { type: "function", function: { name: "normalize_names" } },
+        }),
+      });
+      if (!res.ok) { console.error("Normalize AI error:", await res.text()); return result; }
+      const data = await res.json();
+      const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+      if (toolCall) {
+        const parsed = parseToolCallResult(toolCall);
+        if (parsed?.names) {
+          for (const n of parsed.names) {
+            result.set(n.raw_name.toLowerCase(), n.normalized_name);
+          }
+        }
+      }
+    } else if (provider === "google") {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: NORMALIZE_SYSTEM }] },
+            contents: [{ parts: [{ text: prompt }] }],
+            tools: [{
+              functionDeclarations: [{
+                name: "normalize_names",
+                description: NORMALIZE_TOOL.function.description,
+                parameters: NORMALIZE_TOOL.function.parameters,
+              }],
+            }],
+            toolConfig: { functionCallingConfig: { mode: "ANY", allowedFunctionNames: ["normalize_names"] } },
+            generationConfig: { maxOutputTokens: 4096 },
+          }),
+        }
+      );
+      if (!res.ok) { console.error("Normalize AI error:", await res.text()); return result; }
+      const data = await res.json();
+      const fc = data.candidates?.[0]?.content?.parts?.find((p: any) => p.functionCall);
+      if (fc?.functionCall?.args?.names) {
+        for (const n of fc.functionCall.args.names) {
+          result.set(n.raw_name.toLowerCase(), n.normalized_name);
+        }
+      }
+    }
+  } catch (e) {
+    console.error("Name normalization failed:", e);
+  }
+
+  return result;
+}
+
 // Get user's configured AI provider
 async function getUserAIConfig(supabase: any, userId: string, encryptionKey: string) {
   const { data, error } = await supabase
@@ -566,7 +710,6 @@ async function getUserAIConfig(supabase: any, userId: string, encryptionKey: str
     .single();
 
   if (error || !data) {
-    // Try any provider if no default
     const { data: any_provider } = await supabase
       .from("ai_provider_settings")
       .select("provider, encrypted_api_key, model")
@@ -575,7 +718,6 @@ async function getUserAIConfig(supabase: any, userId: string, encryptionKey: str
       .single();
     if (!any_provider) return null;
 
-    // Decrypt key
     const { data: decrypted } = await supabase.rpc("decrypt_ai_key", {
       encrypted_text: any_provider.encrypted_api_key,
       enc_key: encryptionKey,
@@ -766,12 +908,47 @@ serve(async (req) => {
     }
 
     if (extractedItems.length > 0) {
-      const itemsToInsert = extractedItems.map((item: any) => {
-        let matchedSkuId = null;
+      // Phase 3: Normalize names with AI if available
+      const rawNamesToNormalize = extractedItems
+        .map((item: any) => item.raw_name as string)
+        .filter(Boolean);
+
+      let normalizedMap = new Map<string, string>();
+      if (aiConfig && rawNamesToNormalize.length > 0) {
+        console.log(`Phase 3: Normalizing ${rawNamesToNormalize.length} item names with AI...`);
+        normalizedMap = await normalizeNamesWithAI(
+          rawNamesToNormalize,
+          aiConfig.provider,
+          aiConfig.apiKey,
+          aiConfig.model
+        );
+        console.log(`Normalized ${normalizedMap.size} names`);
+      }
+
+      // Fetch existing SKUs for this user to match by normalized name
+      const { data: existingSkus } = await supabase
+        .from("skus")
+        .select("id, sku_name")
+        .eq("user_id", receiptData.user_id);
+
+      const skuByName = new Map<string, string>();
+      if (existingSkus) {
+        for (const sku of existingSkus) {
+          skuByName.set(sku.sku_name.toLowerCase(), sku.id);
+        }
+      }
+
+      // Build items, matching/creating SKUs as needed
+      const itemsToInsert: any[] = [];
+      const skusToCreate = new Map<string, { sku_name: string; user_id: string }>();
+
+      for (const item of extractedItems) {
+        let matchedSkuId: string | null = null;
         let matchedPackSize = item.pack_size || null;
         let matchedIsPersonal = false;
         let needsReview = true;
 
+        // 1. Check aliases
         if (aliases) {
           for (const alias of aliases) {
             if (alias.vendor === parsed.vendor) {
@@ -787,6 +964,7 @@ serve(async (req) => {
           }
         }
 
+        // 2. Check previously reviewed items
         if (needsReview) {
           const prev = reviewedMap.get(item.raw_name.toLowerCase());
           if (prev) {
@@ -797,12 +975,32 @@ serve(async (req) => {
           }
         }
 
-        return {
+        // 3. Get normalized name and try to match existing SKU
+        const normalizedName = normalizedMap.get(item.raw_name.toLowerCase()) || item.normalized_name || null;
+
+        if (needsReview && normalizedName) {
+          const existingSkuId = skuByName.get(normalizedName.toLowerCase());
+          if (existingSkuId) {
+            matchedSkuId = existingSkuId;
+            needsReview = false;
+          } else {
+            // Queue SKU creation with normalized name
+            const key = normalizedName.toLowerCase();
+            if (!skusToCreate.has(key)) {
+              skusToCreate.set(key, {
+                sku_name: normalizedName,
+                user_id: receiptData.user_id,
+              });
+            }
+          }
+        }
+
+        itemsToInsert.push({
           receipt_id,
           user_id: receiptData.user_id,
           sku_id: matchedSkuId,
           raw_name: item.raw_name,
-          normalized_name: item.normalized_name || null,
+          normalized_name: normalizedName,
           qty: item.qty || 1,
           pack_size: matchedPackSize,
           pack_size_uom: item.pack_size_uom || null,
@@ -810,8 +1008,35 @@ serve(async (req) => {
           line_total: item.line_total,
           is_personal: matchedIsPersonal,
           needs_review: needsReview,
-        };
-      });
+        });
+      }
+
+      // Create new SKUs for unmatched items with normalized names
+      if (skusToCreate.size > 0) {
+        const skuRows = Array.from(skusToCreate.values());
+        console.log(`Creating ${skuRows.length} new SKUs...`);
+        const { data: newSkus } = await supabase
+          .from("skus")
+          .insert(skuRows)
+          .select("id, sku_name");
+
+        if (newSkus) {
+          const newSkuMap = new Map<string, string>();
+          for (const sku of newSkus) {
+            newSkuMap.set(sku.sku_name.toLowerCase(), sku.id);
+          }
+          // Link items to newly created SKUs
+          for (const item of itemsToInsert) {
+            if (!item.sku_id && item.normalized_name) {
+              const skuId = newSkuMap.get(item.normalized_name.toLowerCase());
+              if (skuId) {
+                item.sku_id = skuId;
+                item.needs_review = false;
+              }
+            }
+          }
+        }
+      }
 
       await supabase.from("receipt_items").insert(itemsToInsert);
     }
