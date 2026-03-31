@@ -178,18 +178,16 @@ export default function Stats() {
       .sort((a, b) => b.total_units - a.total_units);
   };
 
-  const calculateBusinessMetrics = (filteredItems: ReceiptItemWithJoins[]): BusinessMetrics => {
-    let total_spend = 0, total_profit = 0, total_units = 0, total_cost = 0;
+  const calculateBusinessMetrics = (filteredItems: ReceiptItemWithJoins[], filteredSales: MachineSale[]): BusinessMetrics => {
+    let total_spend = 0, total_units = 0;
     filteredItems.forEach(item => {
       const units = (item.qty || 1) * (item.pack_size || 1);
-      const unit_cost = item.unit_cost || 0;
-      const sell_price = item.skus?.sell_price || 0;
       total_spend += item.line_total;
       total_units += units;
-      total_cost += unit_cost * units;
-      if (sell_price > 0) total_profit += (sell_price - unit_cost) * units;
     });
-    return { total_spend, total_profit, avg_unit_cost: total_units > 0 ? total_cost / total_units : 0, avg_unit_profit: total_units > 0 ? total_profit / total_units : 0, total_units };
+    const total_revenue = filteredSales.reduce((sum, s) => sum + Number(s.cash_amount) + Number(s.credit_amount), 0);
+    const total_profit = total_revenue - total_spend;
+    return { total_spend, total_revenue, total_profit, avg_unit_cost: total_units > 0 ? total_spend / total_units : 0, total_units };
   };
 
   const calculateStoreSpend = (filteredItems: ReceiptItemWithJoins[]): StoreSpend[] => {
