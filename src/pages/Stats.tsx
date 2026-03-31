@@ -358,12 +358,14 @@ export default function Stats() {
         </Card>
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1">
-            <CardTitle className="text-sm font-medium">Total Units</CardTitle>
-            <Package className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Avg Profit Margin</CardTitle>
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent className="p-4 pt-0">
-            <div className="text-2xl font-bold">{metrics.total_units.toLocaleString()}</div>
-            <p className="text-xs text-muted-foreground">Units purchased</p>
+            <div className={`text-2xl font-bold ${metrics.total_revenue > 0 ? (metrics.total_profit >= 0 ? 'text-green-600' : 'text-red-600') : ''}`}>
+              {metrics.total_revenue > 0 ? `${((metrics.total_profit / metrics.total_revenue) * 100).toFixed(1)}%` : '—'}
+            </div>
+            <p className="text-xs text-muted-foreground">Profit ÷ revenue</p>
           </CardContent>
         </Card>
       </div>
