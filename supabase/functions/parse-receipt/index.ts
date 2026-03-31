@@ -908,12 +908,47 @@ serve(async (req) => {
     }
 
     if (extractedItems.length > 0) {
-      const itemsToInsert = extractedItems.map((item: any) => {
-        let matchedSkuId = null;
+      // Phase 3: Normalize names with AI if available
+      const rawNamesToNormalize = extractedItems
+        .map((item: any) => item.raw_name as string)
+        .filter(Boolean);
+
+      let normalizedMap = new Map<string, string>();
+      if (aiConfig && rawNamesToNormalize.length > 0) {
+        console.log(`Phase 3: Normalizing ${rawNamesToNormalize.length} item names with AI...`);
+        normalizedMap = await normalizeNamesWithAI(
+          rawNamesToNormalize,
+          aiConfig.provider,
+          aiConfig.apiKey,
+          aiConfig.model
+        );
+        console.log(`Normalized ${normalizedMap.size} names`);
+      }
+
+      // Fetch existing SKUs for this user to match by normalized name
+      const { data: existingSkus } = await supabase
+        .from("skus")
+        .select("id, sku_name")
+        .eq("user_id", receiptData.user_id);
+
+      const skuByName = new Map<string, string>();
+      if (existingSkus) {
+        for (const sku of existingSkus) {
+          skuByName.set(sku.sku_name.toLowerCase(), sku.id);
+        }
+      }
+
+      // Build items, matching/creating SKUs as needed
+      const itemsToInsert: any[] = [];
+      const skusToCreate = new Map<string, { sku_name: string; user_id: string }>();
+
+      for (const item of extractedItems) {
+        let matchedSkuId: string | null = null;
         let matchedPackSize = item.pack_size || null;
         let matchedIsPersonal = false;
         let needsReview = true;
 
+        // 1. Check aliases
         if (aliases) {
           for (const alias of aliases) {
             if (alias.vendor === parsed.vendor) {
@@ -929,6 +964,7 @@ serve(async (req) => {
           }
         }
 
+        // 2. Check previously reviewed items
         if (needsReview) {
           const prev = reviewedMap.get(item.raw_name.toLowerCase());
           if (prev) {
@@ -939,12 +975,32 @@ serve(async (req) => {
           }
         }
 
-        return {
+        // 3. Get normalized name and try to match existing SKU
+        const normalizedName = normalizedMap.get(item.raw_name.toLowerCase()) || item.normalized_name || null;
+
+        if (needsReview && normalizedName) {
+          const existingSkuId = skuByName.get(normalizedName.toLowerCase());
+          if (existingSkuId) {
+            matchedSkuId = existingSkuId;
+            needsReview = false;
+          } else {
+            // Queue SKU creation with normalized name
+            const key = normalizedName.toLowerCase();
+            if (!skusToCreate.has(key)) {
+              skusToCreate.set(key, {
+                sku_name: normalizedName,
+                user_id: receiptData.user_id,
+              });
+            }
+          }
+        }
+
+        itemsToInsert.push({
           receipt_id,
           user_id: receiptData.user_id,
           sku_id: matchedSkuId,
           raw_name: item.raw_name,
-          normalized_name: item.normalized_name || null,
+          normalized_name: normalizedName,
           qty: item.qty || 1,
           pack_size: matchedPackSize,
           pack_size_uom: item.pack_size_uom || null,
@@ -952,8 +1008,35 @@ serve(async (req) => {
           line_total: item.line_total,
           is_personal: matchedIsPersonal,
           needs_review: needsReview,
-        };
-      });
+        });
+      }
+
+      // Create new SKUs for unmatched items with normalized names
+      if (skusToCreate.size > 0) {
+        const skuRows = Array.from(skusToCreate.values());
+        console.log(`Creating ${skuRows.length} new SKUs...`);
+        const { data: newSkus } = await supabase
+          .from("skus")
+          .insert(skuRows)
+          .select("id, sku_name");
+
+        if (newSkus) {
+          const newSkuMap = new Map<string, string>();
+          for (const sku of newSkus) {
+            newSkuMap.set(sku.sku_name.toLowerCase(), sku.id);
+          }
+          // Link items to newly created SKUs
+          for (const item of itemsToInsert) {
+            if (!item.sku_id && item.normalized_name) {
+              const skuId = newSkuMap.get(item.normalized_name.toLowerCase());
+              if (skuId) {
+                item.sku_id = skuId;
+                item.needs_review = false;
+              }
+            }
+          }
+        }
+      }
 
       await supabase.from("receipt_items").insert(itemsToInsert);
     }
