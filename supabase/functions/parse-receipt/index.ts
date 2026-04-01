@@ -459,12 +459,14 @@ const NORMALIZE_TOOL = {
   },
 };
 
-const NORMALIZE_SYSTEM = `You normalize raw receipt product names into clean, short, consistent Title Case names.
+function buildNormalizeSystem(existingSkuNames: string[]): string {
+  let base = `You normalize raw receipt product names into clean, short, consistent Title Case names.
 Rules:
 - Keep the brand name and key product identifier (flavor/variant) intact
 - Strip pack sizes, weights, counts, UPCs, and redundant descriptors
 - Use proper capitalization and punctuation (e.g. Smucker's not SMUCKERS)
 - Keep names short but distinct so different variants of the same brand are distinguishable
+- IMPORTANT: If a raw name clearly refers to the same product as one of the user's existing SKU names below, return that EXACT existing name. Only create a new name if the product is genuinely new.
 - Examples:
   "SMUCKERS UNCRUSTABLES PB&J SANDWICH 2PK" → "Smucker's Uncrustables PB&J"
   "SMUCKERS UNCRUSTABLES GRAPE 2PK" → "Smucker's Uncrustables Grape"
@@ -472,6 +474,12 @@ Rules:
   "GV 2% REDUCED FAT MILK GAL" → "Great Value 2% Milk"
   "TIDE PODS ORIG 42CT" → "Tide Pods Original"
 Return a normalized_name for every raw_name provided.`;
+
+  if (existingSkuNames.length > 0) {
+    base += `\n\nUser's existing SKU names (reuse these when the raw name matches):\n${existingSkuNames.map(n => `- ${n}`).join("\n")}`;
+  }
+  return base;
+}
 
 function buildUserPrompt(rawText: string): string {
   return `Here is the complete raw text extracted from ALL pages of the receipt:\n\n${rawText}\n\nParse ALL items from this text. Extract every single line item.`;
@@ -595,16 +603,36 @@ async function parseWithUserProvider(
   throw new Error(`Unknown provider: ${provider}`);
 }
 
+// Fuzzy match: check if two product names are similar enough to be the same SKU
+function fuzzyMatchSku(name1: string, name2: string): boolean {
+  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+  const n1 = normalize(name1);
+  const n2 = normalize(name2);
+  if (n1 === n2) return true;
+  if (n1.includes(n2) || n2.includes(n1)) return true;
+  
+  const words1 = new Set(n1.split(" ").filter(w => w.length > 1));
+  const words2 = new Set(n2.split(" ").filter(w => w.length > 1));
+  if (words1.size === 0 || words2.size === 0) return false;
+  
+  let overlap = 0;
+  for (const w of words1) { if (words2.has(w)) overlap++; }
+  const smaller = Math.min(words1.size, words2.size);
+  return smaller > 0 && (overlap / smaller) >= 0.8;
+}
+
 // Normalize raw names using the user's AI
 async function normalizeNamesWithAI(
   rawNames: string[],
   provider: string,
   apiKey: string,
-  model: string
+  model: string,
+  existingSkuNames: string[]
 ): Promise<Map<string, string>> {
   const result = new Map<string, string>();
   if (rawNames.length === 0) return result;
 
+  const systemPrompt = buildNormalizeSystem(existingSkuNames);
   const prompt = `Normalize these raw receipt product names:\n${rawNames.map((n, i) => `${i + 1}. "${n}"`).join("\n")}`;
 
   try {
@@ -619,7 +647,7 @@ async function normalizeNamesWithAI(
         body: JSON.stringify({
           model,
           max_tokens: 4096,
-          system: NORMALIZE_SYSTEM,
+          system: systemPrompt,
           tools: [{
             name: "normalize_names",
             description: NORMALIZE_TOOL.function.description,
@@ -645,7 +673,7 @@ async function normalizeNamesWithAI(
           model,
           max_tokens: 4096,
           messages: [
-            { role: "system", content: NORMALIZE_SYSTEM },
+            { role: "system", content: systemPrompt },
             { role: "user", content: prompt },
           ],
           tools: [NORMALIZE_TOOL],
@@ -670,7 +698,7 @@ async function normalizeNamesWithAI(
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            systemInstruction: { parts: [{ text: NORMALIZE_SYSTEM }] },
+            systemInstruction: { parts: [{ text: systemPrompt }] },
             contents: [{ parts: [{ text: prompt }] }],
             tools: [{
               functionDeclarations: [{
@@ -908,6 +936,21 @@ serve(async (req) => {
     }
 
     if (extractedItems.length > 0) {
+      // Fetch existing SKUs for this user FIRST (needed for normalization)
+      const { data: existingSkus } = await supabase
+        .from("skus")
+        .select("id, sku_name")
+        .eq("user_id", receiptData.user_id);
+
+      const skuByName = new Map<string, string>();
+      const existingSkuNames: string[] = [];
+      if (existingSkus) {
+        for (const sku of existingSkus) {
+          skuByName.set(sku.sku_name.toLowerCase(), sku.id);
+          existingSkuNames.push(sku.sku_name);
+        }
+      }
+
       // Phase 3: Normalize names with AI if available
       const rawNamesToNormalize = extractedItems
         .map((item: any) => item.raw_name as string)
@@ -915,27 +958,15 @@ serve(async (req) => {
 
       let normalizedMap = new Map<string, string>();
       if (aiConfig && rawNamesToNormalize.length > 0) {
-        console.log(`Phase 3: Normalizing ${rawNamesToNormalize.length} item names with AI...`);
+        console.log(`Phase 3: Normalizing ${rawNamesToNormalize.length} item names with AI (${existingSkuNames.length} existing SKUs as reference)...`);
         normalizedMap = await normalizeNamesWithAI(
           rawNamesToNormalize,
           aiConfig.provider,
           aiConfig.apiKey,
-          aiConfig.model
+          aiConfig.model,
+          existingSkuNames
         );
         console.log(`Normalized ${normalizedMap.size} names`);
-      }
-
-      // Fetch existing SKUs for this user to match by normalized name
-      const { data: existingSkus } = await supabase
-        .from("skus")
-        .select("id, sku_name")
-        .eq("user_id", receiptData.user_id);
-
-      const skuByName = new Map<string, string>();
-      if (existingSkus) {
-        for (const sku of existingSkus) {
-          skuByName.set(sku.sku_name.toLowerCase(), sku.id);
-        }
       }
 
       // Build items, matching/creating SKUs as needed
@@ -979,7 +1010,20 @@ serve(async (req) => {
         const normalizedName = normalizedMap.get(item.raw_name.toLowerCase()) || item.normalized_name || null;
 
         if (needsReview && normalizedName) {
-          const existingSkuId = skuByName.get(normalizedName.toLowerCase());
+          // Exact match first
+          let existingSkuId = skuByName.get(normalizedName.toLowerCase());
+          
+          // Fuzzy match fallback
+          if (!existingSkuId && existingSkus) {
+            for (const sku of existingSkus) {
+              if (fuzzyMatchSku(normalizedName, sku.sku_name)) {
+                existingSkuId = sku.id;
+                console.log(`Fuzzy matched "${normalizedName}" → "${sku.sku_name}"`);
+                break;
+              }
+            }
+          }
+          
           if (existingSkuId) {
             matchedSkuId = existingSkuId;
             needsReview = false;
