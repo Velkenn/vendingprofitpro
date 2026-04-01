@@ -459,12 +459,14 @@ const NORMALIZE_TOOL = {
   },
 };
 
-const NORMALIZE_SYSTEM = `You normalize raw receipt product names into clean, short, consistent Title Case names.
+function buildNormalizeSystem(existingSkuNames: string[]): string {
+  let base = `You normalize raw receipt product names into clean, short, consistent Title Case names.
 Rules:
 - Keep the brand name and key product identifier (flavor/variant) intact
 - Strip pack sizes, weights, counts, UPCs, and redundant descriptors
 - Use proper capitalization and punctuation (e.g. Smucker's not SMUCKERS)
 - Keep names short but distinct so different variants of the same brand are distinguishable
+- IMPORTANT: If a raw name clearly refers to the same product as one of the user's existing SKU names below, return that EXACT existing name. Only create a new name if the product is genuinely new.
 - Examples:
   "SMUCKERS UNCRUSTABLES PB&J SANDWICH 2PK" → "Smucker's Uncrustables PB&J"
   "SMUCKERS UNCRUSTABLES GRAPE 2PK" → "Smucker's Uncrustables Grape"
@@ -472,6 +474,12 @@ Rules:
   "GV 2% REDUCED FAT MILK GAL" → "Great Value 2% Milk"
   "TIDE PODS ORIG 42CT" → "Tide Pods Original"
 Return a normalized_name for every raw_name provided.`;
+
+  if (existingSkuNames.length > 0) {
+    base += `\n\nUser's existing SKU names (reuse these when the raw name matches):\n${existingSkuNames.map(n => `- ${n}`).join("\n")}`;
+  }
+  return base;
+}
 
 function buildUserPrompt(rawText: string): string {
   return `Here is the complete raw text extracted from ALL pages of the receipt:\n\n${rawText}\n\nParse ALL items from this text. Extract every single line item.`;
