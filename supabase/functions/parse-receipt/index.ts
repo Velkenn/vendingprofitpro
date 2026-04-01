@@ -1010,7 +1010,20 @@ serve(async (req) => {
         const normalizedName = normalizedMap.get(item.raw_name.toLowerCase()) || item.normalized_name || null;
 
         if (needsReview && normalizedName) {
-          const existingSkuId = skuByName.get(normalizedName.toLowerCase());
+          // Exact match first
+          let existingSkuId = skuByName.get(normalizedName.toLowerCase());
+          
+          // Fuzzy match fallback
+          if (!existingSkuId && existingSkus) {
+            for (const sku of existingSkus) {
+              if (fuzzyMatchSku(normalizedName, sku.sku_name)) {
+                existingSkuId = sku.id;
+                console.log(`Fuzzy matched "${normalizedName}" → "${sku.sku_name}"`);
+                break;
+              }
+            }
+          }
+          
           if (existingSkuId) {
             matchedSkuId = existingSkuId;
             needsReview = false;
