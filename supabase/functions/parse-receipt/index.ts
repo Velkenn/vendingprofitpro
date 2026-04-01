@@ -603,16 +603,36 @@ async function parseWithUserProvider(
   throw new Error(`Unknown provider: ${provider}`);
 }
 
+// Fuzzy match: check if two product names are similar enough to be the same SKU
+function fuzzyMatchSku(name1: string, name2: string): boolean {
+  const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+  const n1 = normalize(name1);
+  const n2 = normalize(name2);
+  if (n1 === n2) return true;
+  if (n1.includes(n2) || n2.includes(n1)) return true;
+  
+  const words1 = new Set(n1.split(" ").filter(w => w.length > 1));
+  const words2 = new Set(n2.split(" ").filter(w => w.length > 1));
+  if (words1.size === 0 || words2.size === 0) return false;
+  
+  let overlap = 0;
+  for (const w of words1) { if (words2.has(w)) overlap++; }
+  const smaller = Math.min(words1.size, words2.size);
+  return smaller > 0 && (overlap / smaller) >= 0.8;
+}
+
 // Normalize raw names using the user's AI
 async function normalizeNamesWithAI(
   rawNames: string[],
   provider: string,
   apiKey: string,
-  model: string
+  model: string,
+  existingSkuNames: string[]
 ): Promise<Map<string, string>> {
   const result = new Map<string, string>();
   if (rawNames.length === 0) return result;
 
+  const systemPrompt = buildNormalizeSystem(existingSkuNames);
   const prompt = `Normalize these raw receipt product names:\n${rawNames.map((n, i) => `${i + 1}. "${n}"`).join("\n")}`;
 
   try {
@@ -627,7 +647,7 @@ async function normalizeNamesWithAI(
         body: JSON.stringify({
           model,
           max_tokens: 4096,
-          system: NORMALIZE_SYSTEM,
+          system: systemPrompt,
           tools: [{
             name: "normalize_names",
             description: NORMALIZE_TOOL.function.description,
@@ -653,7 +673,7 @@ async function normalizeNamesWithAI(
           model,
           max_tokens: 4096,
           messages: [
-            { role: "system", content: NORMALIZE_SYSTEM },
+            { role: "system", content: systemPrompt },
             { role: "user", content: prompt },
           ],
           tools: [NORMALIZE_TOOL],
@@ -678,7 +698,7 @@ async function normalizeNamesWithAI(
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            systemInstruction: { parts: [{ text: NORMALIZE_SYSTEM }] },
+            systemInstruction: { parts: [{ text: systemPrompt }] },
             contents: [{ parts: [{ text: prompt }] }],
             tools: [{
               functionDeclarations: [{
