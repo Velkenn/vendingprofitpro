@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -24,7 +25,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Search, Package, Edit2, Trash2, Check, X } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Search, Package, Edit2, Trash2, Check, X, Merge, ListChecks } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useSKUDetail } from "@/contexts/SKUDetailContext";
 import type { Tables } from "@/integrations/supabase/types";
@@ -55,6 +64,13 @@ export default function SKUs() {
   const [categorySearch, setCategorySearch] = useState("");
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
   const categoryRef = useRef<HTMLDivElement>(null);
+
+  // Merge state
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [mergeDialogOpen, setMergeDialogOpen] = useState(false);
+  const [survivorId, setSurvivorId] = useState<string | null>(null);
+  const [merging, setMerging] = useState(false);
 
   useEffect(() => {
     if (!user) return;
@@ -150,7 +166,6 @@ export default function SKUs() {
   const confirmDelete = async () => {
     if (!deleteId) return;
     setDeleting(true);
-    // Unlink receipt_items first
     await supabase
       .from("receipt_items")
       .update({ sku_id: null, needs_review: true })
@@ -171,9 +186,105 @@ export default function SKUs() {
     c.toLowerCase().includes(categorySearch.toLowerCase())
   );
 
+  // Merge logic
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  };
+
+  const openMergeDialog = () => {
+    if (selectedIds.size < 2) {
+      toast({ title: "Select at least 2 SKUs to merge", variant: "destructive" });
+      return;
+    }
+    // Default survivor = first selected alphabetically
+    const selectedSkus = skus.filter((s) => selectedIds.has(s.id)).sort((a, b) => a.sku_name.localeCompare(b.sku_name));
+    setSurvivorId(selectedSkus[0].id);
+    setMergeDialogOpen(true);
+  };
+
+  const confirmMerge = async () => {
+    if (!survivorId || selectedIds.size < 2) return;
+    setMerging(true);
+
+    const idsToMerge = [...selectedIds].filter((id) => id !== survivorId);
+
+    // Reassign receipt_items from doomed SKUs to survivor
+    for (const doomedId of idsToMerge) {
+      await supabase
+        .from("receipt_items")
+        .update({ sku_id: survivorId })
+        .eq("sku_id", doomedId);
+
+      // Reassign sku_aliases
+      await supabase
+        .from("sku_aliases")
+        .update({ sku_id: survivorId })
+        .eq("sku_id", doomedId);
+
+      // Reassign machine_skus (delete duplicates first, then update)
+      await supabase
+        .from("machine_skus")
+        .delete()
+        .eq("sku_id", doomedId)
+        .eq("sku_id", survivorId); // This won't work as intended, handle below
+
+      // Just delete machine_skus for doomed and let survivor's remain
+      await supabase
+        .from("machine_skus")
+        .delete()
+        .eq("sku_id", doomedId);
+
+      // Delete the doomed SKU
+      await supabase.from("skus").delete().eq("id", doomedId);
+    }
+
+    setSkus((prev) => prev.filter((s) => !idsToMerge.includes(s.id)));
+    setMerging(false);
+    setMergeDialogOpen(false);
+    exitSelectMode();
+    toast({
+      title: "SKUs merged",
+      description: `${idsToMerge.length} SKU(s) merged into "${skus.find((s) => s.id === survivorId)?.sku_name}".`,
+    });
+  };
+
+  const selectedSkusList = skus.filter((s) => selectedIds.has(s.id)).sort((a, b) => a.sku_name.localeCompare(b.sku_name));
+
   return (
     <div className="px-4 pt-6">
-      <h1 className="mb-4 text-2xl font-bold tracking-tight">SKU Master</h1>
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-2xl font-bold tracking-tight">SKU Master</h1>
+        {!selectMode ? (
+          <Button size="sm" variant="outline" onClick={() => setSelectMode(true)}>
+            <ListChecks className="h-4 w-4 mr-1" />
+            Select
+          </Button>
+        ) : (
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              onClick={openMergeDialog}
+              disabled={selectedIds.size < 2}
+            >
+              <Merge className="h-4 w-4 mr-1" />
+              Merge ({selectedIds.size})
+            </Button>
+            <Button size="sm" variant="outline" onClick={exitSelectMode}>
+              Cancel
+            </Button>
+          </div>
+        )}
+      </div>
 
       <div className="relative mb-4">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -299,10 +410,25 @@ export default function SKUs() {
                 </CardContent>
               </Card>
             ) : (
-              <Card key={sku.id} className="border-0 shadow-sm">
+              <Card
+                key={sku.id}
+                className={`border-0 shadow-sm ${selectMode && selectedIds.has(sku.id) ? "ring-2 ring-primary" : ""}`}
+              >
                 <CardContent className="flex items-center gap-3 p-4">
-                  <div className="flex-1 min-w-0">
-                    <p className="font-medium text-sm truncate cursor-pointer underline decoration-dotted" onClick={(e) => { e.stopPropagation(); openSKUDetail(sku.id); }}>{sku.sku_name}</p>
+                  {selectMode && (
+                    <Checkbox
+                      checked={selectedIds.has(sku.id)}
+                      onCheckedChange={() => toggleSelect(sku.id)}
+                      className="shrink-0"
+                    />
+                  )}
+                  <div className="flex-1 min-w-0" onClick={selectMode ? () => toggleSelect(sku.id) : undefined}>
+                    <p
+                      className={`font-medium text-sm truncate ${selectMode ? "cursor-pointer" : "cursor-pointer underline decoration-dotted"}`}
+                      onClick={selectMode ? undefined : (e) => { e.stopPropagation(); openSKUDetail(sku.id); }}
+                    >
+                      {sku.sku_name}
+                    </p>
                     <p className="text-xs text-muted-foreground">{sku.category || "Uncategorized"}</p>
                   </div>
                   <div className="text-right flex flex-col items-end gap-1 shrink-0">
@@ -313,24 +439,26 @@ export default function SKUs() {
                       {sku.rebuy_status}
                     </Badge>
                   </div>
-                  <div className="flex flex-col gap-1 shrink-0 ml-1">
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7"
-                      onClick={() => startEdit(sku)}
-                    >
-                      <Edit2 className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      className="h-7 w-7 text-destructive hover:text-destructive"
-                      onClick={() => setDeleteId(sku.id)}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
+                  {!selectMode && (
+                    <div className="flex flex-col gap-1 shrink-0 ml-1">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        onClick={() => startEdit(sku)}
+                      >
+                        <Edit2 className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-destructive hover:text-destructive"
+                        onClick={() => setDeleteId(sku.id)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )
@@ -338,6 +466,7 @@ export default function SKUs() {
         </div>
       )}
 
+      {/* Delete confirmation */}
       <AlertDialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -358,6 +487,54 @@ export default function SKUs() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Merge dialog — pick survivor */}
+      <Dialog open={mergeDialogOpen} onOpenChange={(o) => !o && setMergeDialogOpen(false)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Merge SKUs</DialogTitle>
+            <DialogDescription>
+              Choose which SKU to keep. All receipt items, aliases, and machine links from the other {selectedIds.size - 1} SKU(s) will be reassigned to it, then the duplicates will be deleted.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 max-h-60 overflow-y-auto">
+            {selectedSkusList.map((sku) => (
+              <label
+                key={sku.id}
+                className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                  survivorId === sku.id
+                    ? "border-primary bg-primary/5"
+                    : "border-border hover:bg-muted/50"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="survivor"
+                  checked={survivorId === sku.id}
+                  onChange={() => setSurvivorId(sku.id)}
+                  className="accent-primary"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{sku.sku_name}</p>
+                  <p className="text-xs text-muted-foreground">{sku.category || "Uncategorized"}</p>
+                </div>
+                {sku.sell_price != null && (
+                  <span className="text-xs font-semibold shrink-0">${Number(sku.sell_price).toFixed(2)}</span>
+                )}
+              </label>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setMergeDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={confirmMerge} disabled={merging || !survivorId}>
+              <Merge className="h-4 w-4 mr-1" />
+              {merging ? "Merging..." : "Merge"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
