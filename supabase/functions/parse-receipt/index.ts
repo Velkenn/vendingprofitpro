@@ -936,6 +936,21 @@ serve(async (req) => {
     }
 
     if (extractedItems.length > 0) {
+      // Fetch existing SKUs for this user FIRST (needed for normalization)
+      const { data: existingSkus } = await supabase
+        .from("skus")
+        .select("id, sku_name")
+        .eq("user_id", receiptData.user_id);
+
+      const skuByName = new Map<string, string>();
+      const existingSkuNames: string[] = [];
+      if (existingSkus) {
+        for (const sku of existingSkus) {
+          skuByName.set(sku.sku_name.toLowerCase(), sku.id);
+          existingSkuNames.push(sku.sku_name);
+        }
+      }
+
       // Phase 3: Normalize names with AI if available
       const rawNamesToNormalize = extractedItems
         .map((item: any) => item.raw_name as string)
@@ -943,27 +958,15 @@ serve(async (req) => {
 
       let normalizedMap = new Map<string, string>();
       if (aiConfig && rawNamesToNormalize.length > 0) {
-        console.log(`Phase 3: Normalizing ${rawNamesToNormalize.length} item names with AI...`);
+        console.log(`Phase 3: Normalizing ${rawNamesToNormalize.length} item names with AI (${existingSkuNames.length} existing SKUs as reference)...`);
         normalizedMap = await normalizeNamesWithAI(
           rawNamesToNormalize,
           aiConfig.provider,
           aiConfig.apiKey,
-          aiConfig.model
+          aiConfig.model,
+          existingSkuNames
         );
         console.log(`Normalized ${normalizedMap.size} names`);
-      }
-
-      // Fetch existing SKUs for this user to match by normalized name
-      const { data: existingSkus } = await supabase
-        .from("skus")
-        .select("id, sku_name")
-        .eq("user_id", receiptData.user_id);
-
-      const skuByName = new Map<string, string>();
-      if (existingSkus) {
-        for (const sku of existingSkus) {
-          skuByName.set(sku.sku_name.toLowerCase(), sku.id);
-        }
       }
 
       // Build items, matching/creating SKUs as needed
