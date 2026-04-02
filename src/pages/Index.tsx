@@ -12,9 +12,10 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Upload as UploadIcon, FileText, Loader2, CheckCircle, XCircle,
-  DollarSign, TrendingDown, AlertTriangle, Tag, Trophy, BarChart3
+  DollarSign, TrendingDown, AlertTriangle, Tag, Trophy, BarChart3,
+  ChevronLeft, ChevronRight
 } from "lucide-react";
-import { startOfMonth, endOfMonth, format } from "date-fns";
+import { startOfMonth, endOfMonth, format, addMonths, subMonths, isSameMonth } from "date-fns";
 import { useSKUDetail } from "@/contexts/SKUDetailContext";
 
 type UploadState = "idle" | "uploading" | "parsing" | "done" | "error";
@@ -53,6 +54,9 @@ export default function Index() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const progressRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Month navigation
+  const [selectedMonth, setSelectedMonth] = useState(new Date());
+
   // Log Sales sheet
   const [salesOpen, setSalesOpen] = useState(false);
   const [machines, setMachines] = useState<{ id: string; name: string }[]>([]);
@@ -83,9 +87,8 @@ export default function Index() {
     if (!user) return;
     setLoading(true);
 
-    const now = new Date();
-    const monthStart = format(startOfMonth(now), "yyyy-MM-dd");
-    const monthEnd = format(endOfMonth(now), "yyyy-MM-dd");
+    const monthStart = format(startOfMonth(selectedMonth), "yyyy-MM-dd");
+    const monthEnd = format(endOfMonth(selectedMonth), "yyyy-MM-dd");
 
     // Parallel fetches
     const [receiptRes, salesRes, machineRes, reviewRes, priceRes] = await Promise.all([
@@ -168,7 +171,7 @@ export default function Index() {
     setBottomSkus(ranked);
 
     setLoading(false);
-  }, [user]);
+  }, [user, selectedMonth]);
 
   useEffect(() => { loadDashboard(); }, [loadDashboard]);
 
@@ -284,10 +287,26 @@ export default function Index() {
       {/* Greeting */}
       <h1 className="text-2xl font-bold tracking-tight">{greeting}</h1>
 
+      {/* Month Navigation */}
+      <div className="flex items-center justify-between">
+        <Button variant="ghost" size="icon" onClick={() => setSelectedMonth(prev => subMonths(prev, 1))}>
+          <ChevronLeft className="h-5 w-5" />
+        </Button>
+        <p className="text-sm font-semibold">{format(selectedMonth, "MMMM yyyy")}</p>
+        <Button
+          variant="ghost"
+          size="icon"
+          disabled={isSameMonth(selectedMonth, new Date())}
+          onClick={() => setSelectedMonth(prev => addMonths(prev, 1))}
+        >
+          <ChevronRight className="h-5 w-5" />
+        </Button>
+      </div>
+
       {/* Hero Profit Card */}
       <Card className="border-0 shadow-md bg-gradient-to-br from-primary/10 to-primary/5">
         <CardContent className="p-5">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">This Month's Profit</p>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">{format(selectedMonth, "MMMM")} Profit</p>
           <p className={`text-4xl font-bold ${totalProfit >= 0 ? "text-primary" : "text-destructive"}`}>
             {loading ? "—" : fmt(totalProfit)}
           </p>
