@@ -14,7 +14,7 @@ import {
   Upload as UploadIcon, FileText, Loader2, CheckCircle, XCircle,
   DollarSign, TrendingDown, AlertTriangle, Tag, Trophy, BarChart3
 } from "lucide-react";
-import { startOfMonth, endOfMonth, format } from "date-fns";
+import { startOfMonth, endOfMonth, format, addMonths, subMonths, isSameMonth } from "date-fns";
 import { useSKUDetail } from "@/contexts/SKUDetailContext";
 
 type UploadState = "idle" | "uploading" | "parsing" | "done" | "error";
