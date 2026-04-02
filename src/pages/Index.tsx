@@ -12,7 +12,8 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Upload as UploadIcon, FileText, Loader2, CheckCircle, XCircle,
-  DollarSign, TrendingDown, AlertTriangle, Tag, Trophy, BarChart3
+  DollarSign, TrendingDown, AlertTriangle, Tag, Trophy, BarChart3,
+  ChevronLeft, ChevronRight
 } from "lucide-react";
 import { startOfMonth, endOfMonth, format, addMonths, subMonths, isSameMonth } from "date-fns";
 import { useSKUDetail } from "@/contexts/SKUDetailContext";
