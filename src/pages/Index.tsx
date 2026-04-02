@@ -54,6 +54,9 @@ export default function Index() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const progressRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Month navigation
+  const [selectedMonth, setSelectedMonth] = useState(new Date());
+
   // Log Sales sheet
   const [salesOpen, setSalesOpen] = useState(false);
   const [machines, setMachines] = useState<{ id: string; name: string }[]>([]);
