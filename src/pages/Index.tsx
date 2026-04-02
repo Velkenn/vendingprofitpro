@@ -171,7 +171,7 @@ export default function Index() {
     setBottomSkus(ranked);
 
     setLoading(false);
-  }, [user]);
+  }, [user, selectedMonth]);
 
   useEffect(() => { loadDashboard(); }, [loadDashboard]);
 
