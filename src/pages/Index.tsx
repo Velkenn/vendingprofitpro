@@ -87,9 +87,8 @@ export default function Index() {
     if (!user) return;
     setLoading(true);
 
-    const now = new Date();
-    const monthStart = format(startOfMonth(now), "yyyy-MM-dd");
-    const monthEnd = format(endOfMonth(now), "yyyy-MM-dd");
+    const monthStart = format(startOfMonth(selectedMonth), "yyyy-MM-dd");
+    const monthEnd = format(endOfMonth(selectedMonth), "yyyy-MM-dd");
 
     // Parallel fetches
     const [receiptRes, salesRes, machineRes, reviewRes, priceRes] = await Promise.all([
