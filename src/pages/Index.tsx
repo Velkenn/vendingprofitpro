@@ -287,10 +287,26 @@ export default function Index() {
       {/* Greeting */}
       <h1 className="text-2xl font-bold tracking-tight">{greeting}</h1>
 
+      {/* Month Navigation */}
+      <div className="flex items-center justify-between">
+        <Button variant="ghost" size="icon" onClick={() => setSelectedMonth(prev => subMonths(prev, 1))}>
+          <ChevronLeft className="h-5 w-5" />
+        </Button>
+        <p className="text-sm font-semibold">{format(selectedMonth, "MMMM yyyy")}</p>
+        <Button
+          variant="ghost"
+          size="icon"
+          disabled={isSameMonth(selectedMonth, new Date())}
+          onClick={() => setSelectedMonth(prev => addMonths(prev, 1))}
+        >
+          <ChevronRight className="h-5 w-5" />
+        </Button>
+      </div>
+
       {/* Hero Profit Card */}
       <Card className="border-0 shadow-md bg-gradient-to-br from-primary/10 to-primary/5">
         <CardContent className="p-5">
-          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">This Month's Profit</p>
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">{format(selectedMonth, "MMMM")} Profit</p>
           <p className={`text-4xl font-bold ${totalProfit >= 0 ? "text-primary" : "text-destructive"}`}>
             {loading ? "—" : fmt(totalProfit)}
           </p>
