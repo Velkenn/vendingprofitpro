@@ -301,32 +301,66 @@ export default function Receipts() {
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-2">
-          {receipts.map((r) => {
-            const status = getReceiptStatus(r.parse_status);
-            const StatusIcon = status.icon;
-            return (
-              <Card key={r.id} className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate(`/receipts/${r.id}`)}>
-                <CardContent className="flex items-center gap-3 p-4">
-                  <div className="flex-1">
-                    <p className="font-medium capitalize">{r.vendor === "sams" ? "Sam's Club" : "Walmart"}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {format(new Date(r.receipt_date), "MMM d, yyyy")}
-                      {r.item_count ? ` · ${r.item_count} items` : ""}
-                    </p>
-                  </div>
-                  <div className="text-right flex flex-col items-end gap-1">
-                    <p className="font-bold">${Number(r.total || 0).toFixed(2)}</p>
-                    <Badge variant="secondary" className={`text-xs gap-1 ${status.badgeClass}`}>
-                      <StatusIcon className={`h-3 w-3 ${status.animate ? "animate-spin" : ""}`} />
-                      {status.label}
-                    </Badge>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+        (() => {
+          // Group receipts by month
+          const grouped = new Map<string, Tables<"receipts">[]>();
+          for (const r of receipts) {
+            const key = format(parseISO(r.receipt_date), "yyyy-MM");
+            if (!grouped.has(key)) grouped.set(key, []);
+            grouped.get(key)!.push(r);
+          }
+          const months = Array.from(grouped.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+
+          return (
+            <div className="space-y-3">
+              {months.map(([monthKey, monthReceipts], idx) => {
+                const monthLabel = format(parseISO(monthKey + "-01"), "MMMM yyyy");
+                const monthTotal = monthReceipts.reduce((s, r) => s + Number(r.total || 0), 0);
+
+                return (
+                  <Collapsible key={monthKey} defaultOpen={idx === 0}>
+                    <CollapsibleTrigger className="flex items-center justify-between w-full px-2 py-2 rounded-lg hover:bg-muted/50 transition-colors group">
+                      <div className="flex items-center gap-2">
+                        <ChevronRightIcon className="h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
+                        <span className="font-semibold text-sm">{monthLabel}</span>
+                        <Badge variant="secondary" className="text-xs">{monthReceipts.length}</Badge>
+                      </div>
+                      <span className="text-sm font-semibold text-muted-foreground">${monthTotal.toFixed(2)}</span>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <div className="space-y-2 mt-2">
+                        {monthReceipts.map((r) => {
+                          const status = getReceiptStatus(r.parse_status);
+                          const StatusIcon = status.icon;
+                          return (
+                            <Card key={r.id} className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate(`/receipts/${r.id}`)}>
+                              <CardContent className="flex items-center gap-3 p-4">
+                                <div className="flex-1">
+                                  <p className="font-medium capitalize">{r.vendor === "sams" ? "Sam's Club" : "Walmart"}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {format(new Date(r.receipt_date), "MMM d, yyyy")}
+                                    {r.item_count ? ` · ${r.item_count} items` : ""}
+                                  </p>
+                                </div>
+                                <div className="text-right flex flex-col items-end gap-1">
+                                  <p className="font-bold">${Number(r.total || 0).toFixed(2)}</p>
+                                  <Badge variant="secondary" className={`text-xs gap-1 ${status.badgeClass}`}>
+                                    <StatusIcon className={`h-3 w-3 ${status.animate ? "animate-spin" : ""}`} />
+                                    {status.label}
+                                  </Badge>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          );
+                        })}
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+                );
+              })}
+            </div>
+          );
+        })()
       )}
     </div>
   );
