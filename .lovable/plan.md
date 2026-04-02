@@ -1,51 +1,55 @@
 
 
-## Editable Purchase History Cards + Better SKU Deduplication
+## Dashboard Redesign + Native Mobile Feel
 
-### 1. Editable Purchase History Cards in SKUDetailModal
+### Part 1: Rewrite `src/pages/Index.tsx`
 
-**File: `src/components/sku/SKUDetailModal.tsx`**
+Complete rewrite of the dashboard with these sections top-to-bottom:
 
-- Add state: `editingIndex` (which card is being edited or null), `editQty`, `editPackSize`, `editLineTotal`, `editSaving`
-- Each purchase history card becomes tappable — clicking sets `editingIndex` and pre-fills edit fields from `receipt_items` data
-- The edit view replaces the card content with input fields for qty, pack_size, line_total, plus Save and Delete buttons
-- Need to also fetch `receipt_items.id` in the query so we can update/delete by ID
-- **Save**: `supabase.from("receipt_items").update({ qty, pack_size, line_total, unit_cost: computed }).eq("id", itemId)`
-- **Delete**: `supabase.from("receipt_items").delete().eq("id", itemId)` then refresh
-- After save/delete, re-fetch data to update the modal
+1. **Greeting header** — "Good morning" / "Good afternoon" / "Good evening" based on `new Date().getHours()`. No username shown.
 
-### 2. Stronger SKU Deduplication
+2. **Hero profit card** — Full-width card with dark green gradient background. Large green text showing this month's profit (revenue from `machine_sales` minus spend from `receipt_items`). Below it, two smaller numbers: "Revenue" and "Spend" in muted text.
 
-**File: `supabase/functions/parse-receipt/index.ts`**
+3. **Two action buttons side-by-side** — Green filled "Upload Receipt" button (triggers same file upload + parse flow currently in Receipts page, reuse same logic inline) and an outlined "Log Sales" button. Upload Receipt opens the file picker and runs the upload/parse flow with progress bar inline on the dashboard. Log Sales opens a Drawer/Sheet bottom sheet.
 
-The current matching is exact on `normalizedName.toLowerCase()`. Slight AI variations like "Monster Energy Zero" vs "Monster Energy Zero Ultra" create duplicates.
+4. **Log Sales bottom sheet** — Uses `Sheet` component (side="bottom"). First step: dropdown `Select` to pick a machine from user's `machines` table. Second step: date, cash, credit inputs + save button. Insert into `machine_sales`. No navigation away from dashboard.
 
-**Two-pronged fix:**
+5. **"Needs Attention" section** — Horizontal bar chart of bottom 8 SKUs by profit this month. Each bar shows SKU name and profit amount. Red/orange bars for negative or low profit. Uses simple CSS bars (no chart library needed).
 
-**A. Enhanced AI normalization prompt** — Update `NORMALIZE_SYSTEM` to add:
-- "If two names refer to the same product, normalize them identically"
-- Include the user's existing SKU names in the prompt so the AI can match against them directly
-- Change the prompt to: "Here are the user's existing SKU names: [list]. For each raw name, return the matching existing SKU name if it's clearly the same product, or create a new normalized name if it's genuinely new."
+6. **Compact stat row** — Three stats in a row: units purchased this month, avg profit margin this month, best machine this month (by revenue from `machine_sales`).
 
-**B. Fuzzy matching fallback** — After exact match fails, do a simple similarity check:
-- Normalize both strings (lowercase, strip punctuation/spaces)
-- Check if one name starts with or contains the other
-- Compute word-overlap ratio: if 80%+ of words match, treat as same SKU
-- This catches cases like "Smucker's Uncrustables PB&J" vs "Smuckers Uncrustables PBJ"
+7. **Inline alerts** — Only render if `needsReviewCount > 0` or `needsPriceCount > 0`. Clean card with warning icon, tappable rows. Hidden entirely when both are zero.
 
-**Implementation detail for the AI-aware matching:**
-```
-// In the main handler, before calling normalizeNamesWithAI:
-// Pass existing SKU names to the normalize function
-const existingSkuNames = existingSkus?.map(s => s.sku_name) || [];
-// Update normalizeNamesWithAI to accept and include them in the prompt
+8. **Remove** — Business Spend card, Personal Spend card, Top 5 SKUs section, old welcome message.
+
+### Data fetching changes
+- Switch from weekly to monthly time window (`startOfMonth` / `endOfMonth`)
+- Fetch `machine_sales` for total revenue calculation
+- Fetch all non-personal `receipt_items` this month for spend + SKU profit ranking
+- Fetch `machines` list for the Log Sales dropdown and best machine stat
+- Bottom 8 SKUs: same profit calc as before but sorted ascending, sliced to 8
+
+### Part 2: Native mobile feel — global CSS + meta tag changes
+
+**`index.html`** — Update viewport meta tag:
+```html
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
 ```
 
-Update `NORMALIZE_SYSTEM` and `normalizeNamesWithAI` signature to accept existing SKU names and include them in the prompt as reference names to match against.
+**`src/index.css`** — Add to base layer:
+```css
+* { touch-action: manipulation; }
+html { -webkit-text-size-adjust: 100%; }
+input, textarea, select { font-size: 16px; }
+```
 
-Add a `fuzzyMatchSku` helper function that compares word sets between two names and returns true if overlap >= 80%.
+Add to scrollable containers utility:
+```css
+.scroll-touch { -webkit-overflow-scrolling: touch; }
+```
 
-### Summary of changes
-- `src/components/sku/SKUDetailModal.tsx` — add edit/delete to purchase history cards
-- `supabase/functions/parse-receipt/index.ts` — pass existing SKU names to AI normalization, add fuzzy matching fallback
+### Files changed
+- **Rewrite**: `src/pages/Index.tsx` — new dashboard layout + Log Sales sheet
+- **Edit**: `index.html` — viewport meta tag
+- **Edit**: `src/index.css` — touch/zoom prevention, 16px input font size
 
