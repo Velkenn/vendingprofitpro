@@ -9,7 +9,7 @@ import { BarChart3, Package, DollarSign, TrendingUp, Store, ChevronLeft, Chevron
 import { useSKUDetail } from "@/contexts/SKUDetailContext";
 import type { Tables } from "@/integrations/supabase/types";
 import { startOfWeek, startOfMonth, startOfYear, endOfWeek, endOfMonth, endOfYear, isAfter, isBefore, subWeeks, subMonths, subYears, format, parseISO } from "date-fns";
-import { cn } from "@/lib/utils";
+import { cn, cleanStoreDisplay } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -153,7 +153,7 @@ export default function Stats() {
     const displayName = vendor === "sams" ? "Sam's Club" : vendor === "walmart" ? "Walmart" : (item.receipts.store_location || "Unknown Store");
     const sName = vendor === "sams" ? "Sam's Club" : vendor === "walmart" ? "Walmart" : displayName.split(",")[0]?.trim() || "Unknown Store";
     const city = item.receipts.store_location ? extractCity(item.receipts.store_location) : null;
-    return city ? `${sName} — ${city}` : sName;
+    return cleanStoreDisplay(city ? `${sName} — ${city}` : sName);
   };
 
   const handleStoreClick = async (storeLabel: string) => {
@@ -307,7 +307,7 @@ export default function Stats() {
     const results: StoreSpend[] = [];
     storeCitySpend.forEach((cityMap, sName) => {
       cityMap.forEach((total, city) => {
-        const label = city ? `${sName} — ${city}` : sName;
+        const label = cleanStoreDisplay(city ? `${sName} — ${city}` : sName);
         results.push({ store: label, total, percentage: grandTotal > 0 ? (total / grandTotal) * 100 : 0 });
       });
     });
@@ -610,7 +610,7 @@ export default function Stats() {
                           className="shrink-0"
                         />
                       )}
-                      <span className="text-sm font-medium">{s.store}</span>
+                      <span className="text-sm font-medium">{cleanStoreDisplay(s.store)}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-bold">${s.total.toFixed(2)}</span>
@@ -708,7 +708,7 @@ export default function Stats() {
                             <Card key={r.id} className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow" onClick={() => { setSelectedStore(null); navigate(`/receipts/${r.id}`); }}>
                               <CardContent className="flex items-center gap-3 p-4">
                                 <div className="flex-1">
-                                  <p className="font-medium capitalize">{r.vendor === "sams" ? "Sam's Club" : r.vendor === "walmart" ? "Walmart" : (r.store_location || "Unknown Store")}</p>
+                                  <p className="font-medium capitalize">{cleanStoreDisplay(r.vendor === "sams" ? "Sam's Club" : r.vendor === "walmart" ? "Walmart" : (r.store_location || "Unknown Store"))}</p>
                                   <p className="text-xs text-muted-foreground">
                                     {format(parseISO(r.receipt_date), "MMM d, yyyy")}
                                     {r.item_count ? ` · ${r.item_count} items` : ""}
