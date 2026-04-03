@@ -138,7 +138,36 @@ export default function Stats() {
     return "";
   };
 
-  const getFilteredItems = (): ReceiptItemWithJoins[] => {
+  const getStoreLabel = (item: ReceiptItemWithJoins): string => {
+    const vendor = item.receipts.vendor;
+    const displayName = vendor === "sams" ? "Sam's Club" : vendor === "walmart" ? "Walmart" : (item.receipts.store_location || "Unknown Store");
+    const sName = vendor === "sams" ? "Sam's Club" : vendor === "walmart" ? "Walmart" : displayName.split(",")[0]?.trim() || "Unknown Store";
+    const city = item.receipts.store_location ? extractCity(item.receipts.store_location) : null;
+    return city ? `${sName} — ${city}` : sName;
+  };
+
+  const handleStoreClick = async (storeLabel: string) => {
+    setSelectedStore(storeLabel);
+    setStoreReceiptsLoading(true);
+    // Find matching receipt IDs from filtered items
+    const matchingReceiptIds = new Set<string>();
+    filteredItems.forEach(item => {
+      if (getStoreLabel(item) === storeLabel) matchingReceiptIds.add(item.receipt_id);
+    });
+    if (matchingReceiptIds.size > 0) {
+      const { data } = await supabase
+        .from("receipts")
+        .select("*")
+        .in("id", Array.from(matchingReceiptIds))
+        .order("receipt_date", { ascending: false });
+      setStoreReceipts(data || []);
+    } else {
+      setStoreReceipts([]);
+    }
+    setStoreReceiptsLoading(false);
+  };
+
+
     const range = getFilterRange(timeFilter, periodOffset);
     if (!range) return items;
     return items.filter(item => {
