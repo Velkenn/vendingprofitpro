@@ -610,7 +610,7 @@ export default function Stats() {
                           className="shrink-0"
                         />
                       )}
-                      <span className="text-sm font-medium">{s.store}</span>
+                      <span className="text-sm font-medium">{cleanStoreDisplay(s.store)}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-bold">${s.total.toFixed(2)}</span>
