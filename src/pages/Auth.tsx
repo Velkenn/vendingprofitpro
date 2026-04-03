@@ -69,7 +69,7 @@ export default function Auth() {
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-primary">
             <Receipt className="h-7 w-7 text-primary-foreground" />
           </div>
-          <CardTitle className="text-2xl font-bold tracking-tight">EMVending</CardTitle>
+          <CardTitle className="text-2xl font-bold tracking-tight">VendingTrackr</CardTitle>
           <CardDescription>Receipts & Profit Tracker</CardDescription>
         </CardHeader>
         <CardContent>
