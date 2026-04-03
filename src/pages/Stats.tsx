@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { BarChart3, Package, DollarSign, TrendingUp, Store, ChevronLeft, ChevronRight, Banknote, ChevronRight as ChevronRightIcon } from "lucide-react";
+import { BarChart3, Package, DollarSign, TrendingUp, Store, ChevronLeft, ChevronRight, Banknote, ChevronRight as ChevronRightIcon, ListChecks, Merge } from "lucide-react";
 import { useSKUDetail } from "@/contexts/SKUDetailContext";
 import type { Tables } from "@/integrations/supabase/types";
 import { startOfWeek, startOfMonth, startOfYear, endOfWeek, endOfMonth, endOfYear, isAfter, isBefore, subWeeks, subMonths, subYears, format, parseISO } from "date-fns";
@@ -13,8 +13,10 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { getReceiptStatus } from "@/lib/receipt-status";
-
+import { useToast } from "@/hooks/use-toast";
 type ReceiptItemWithJoins = Tables<"receipt_items"> & {
   skus: Pick<Tables<"skus">, "sku_name" | "sell_price"> | null;
   receipts: Pick<Tables<"receipts">, "receipt_date" | "vendor" | "store_location">;
@@ -56,6 +58,7 @@ type TimeFilter = "week" | "month" | "year" | "lifetime" | "q1" | "q2" | "q3" | 
 export default function Stats() {
   const { user } = useAuth();
   const { openSKUDetail } = useSKUDetail();
+  const { toast } = useToast();
   const navigate = useNavigate();
   const [items, setItems] = useState<ReceiptItemWithJoins[]>([]);
   const [machineSales, setMachineSales] = useState<MachineSale[]>([]);
@@ -65,6 +68,13 @@ export default function Stats() {
   const [selectedStore, setSelectedStore] = useState<string | null>(null);
   const [storeReceipts, setStoreReceipts] = useState<Tables<"receipts">[]>([]);
   const [storeReceiptsLoading, setStoreReceiptsLoading] = useState(false);
+
+  // Store merge state
+  const [storeSelectMode, setStoreSelectMode] = useState(false);
+  const [selectedStores, setSelectedStores] = useState<Set<string>>(new Set());
+  const [storeMergeDialogOpen, setStoreMergeDialogOpen] = useState(false);
+  const [survivorStore, setSurvivorStore] = useState<string | null>(null);
+  const [storeMerging, setStoreMerging] = useState(false);
 
   useEffect(() => { setPeriodOffset(0); }, [timeFilter]);
 
@@ -305,6 +315,91 @@ export default function Stats() {
     return results.sort((a, b) => b.total - a.total);
   };
 
+  const toggleStoreSelect = (store: string) => {
+    setSelectedStores(prev => {
+      const next = new Set(prev);
+      if (next.has(store)) next.delete(store);
+      else next.add(store);
+      return next;
+    });
+  };
+
+  const exitStoreSelectMode = () => {
+    setStoreSelectMode(false);
+    setSelectedStores(new Set());
+  };
+
+  const openStoreMergeDialog = () => {
+    if (selectedStores.size < 2) {
+      toast({ title: "Select at least 2 stores to merge", variant: "destructive" });
+      return;
+    }
+    const sorted = Array.from(selectedStores).sort();
+    setSurvivorStore(sorted[0]);
+    setStoreMergeDialogOpen(true);
+  };
+
+  const confirmStoreMerge = async () => {
+    if (!survivorStore || selectedStores.size < 2) return;
+    setStoreMerging(true);
+
+    const fi = getFilteredItems();
+    // Build a map: storeLabel -> list of receipt_ids
+    const labelToReceiptIds = new Map<string, Set<string>>();
+    fi.forEach(item => {
+      const label = getStoreLabel(item);
+      if (!labelToReceiptIds.has(label)) labelToReceiptIds.set(label, new Set());
+      labelToReceiptIds.get(label)!.add(item.receipt_id);
+    });
+
+    // Find the store_location value of a receipt belonging to the survivor label
+    const survivorReceiptIds = labelToReceiptIds.get(survivorStore);
+    let survivorLocation = survivorStore; // fallback
+    if (survivorReceiptIds && survivorReceiptIds.size > 0) {
+      const sampleItem = fi.find(i => survivorReceiptIds.has(i.receipt_id));
+      if (sampleItem?.receipts.store_location) survivorLocation = sampleItem.receipts.store_location;
+    }
+
+    // Determine vendor from survivor
+    const sampleSurvivorItem = fi.find(i => survivorReceiptIds?.has(i.receipt_id));
+    const survivorVendor = sampleSurvivorItem?.receipts.vendor || "other";
+
+    // Collect receipt IDs from non-survivor stores
+    const doomedReceiptIds: string[] = [];
+    selectedStores.forEach(label => {
+      if (label === survivorStore) return;
+      const ids = labelToReceiptIds.get(label);
+      if (ids) doomedReceiptIds.push(...Array.from(ids));
+    });
+
+    // Update receipts in batches
+    if (doomedReceiptIds.length > 0) {
+      const batchSize = 50;
+      for (let i = 0; i < doomedReceiptIds.length; i += batchSize) {
+        const batch = doomedReceiptIds.slice(i, i + batchSize);
+        await supabase
+          .from("receipts")
+          .update({ store_location: survivorLocation, vendor: survivorVendor })
+          .in("id", batch);
+      }
+    }
+
+    // Refresh items to reflect changes
+    const { data: refreshed } = await supabase
+      .from("receipt_items")
+      .select(`*, skus(sku_name, sell_price), receipts!inner(receipt_date, vendor, store_location)`)
+      .order("created_at", { ascending: false });
+    if (refreshed) setItems(refreshed as ReceiptItemWithJoins[]);
+
+    setStoreMerging(false);
+    setStoreMergeDialogOpen(false);
+    exitStoreSelectMode();
+    toast({
+      title: "Stores merged",
+      description: `${selectedStores.size - 1} store(s) merged into "${survivorStore}".`,
+    });
+  };
+
   if (loading) {
     return (
       <div className="px-4 pt-6">
@@ -470,9 +565,25 @@ export default function Stats() {
       {/* Store Spend Breakdown */}
       <Card>
         <CardHeader className="pb-1">
-          <div className="flex items-center gap-2">
-            <Store className="h-5 w-5 text-primary" />
-            <CardTitle className="text-lg">Spend by Store</CardTitle>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Store className="h-5 w-5 text-primary" />
+              <CardTitle className="text-lg">Spend by Store</CardTitle>
+            </div>
+            {!storeSelectMode ? (
+              <Button size="sm" variant="outline" onClick={() => setStoreSelectMode(true)}>
+                <ListChecks className="h-4 w-4 mr-1" />
+                Select
+              </Button>
+            ) : (
+              <div className="flex gap-2">
+                <Button size="sm" onClick={openStoreMergeDialog} disabled={selectedStores.size < 2}>
+                  <Merge className="h-4 w-4 mr-1" />
+                  Merge ({selectedStores.size})
+                </Button>
+                <Button size="sm" variant="outline" onClick={exitStoreSelectMode}>Cancel</Button>
+              </div>
+            )}
           </div>
         </CardHeader>
         <CardContent className="p-4 pt-0">
@@ -481,13 +592,30 @@ export default function Stats() {
           ) : (
             <div className="space-y-3">
               {storeSpend.map(s => (
-                <div key={s.store} className="space-y-1 cursor-pointer hover:bg-muted/50 rounded-lg p-2 -mx-2 transition-colors" onClick={() => handleStoreClick(s.store)}>
+                <div
+                  key={s.store}
+                  className={cn(
+                    "space-y-1 rounded-lg p-2 -mx-2 transition-colors",
+                    storeSelectMode && selectedStores.has(s.store) ? "ring-2 ring-primary bg-primary/5" : "",
+                    storeSelectMode ? "cursor-pointer" : "cursor-pointer hover:bg-muted/50"
+                  )}
+                  onClick={() => storeSelectMode ? toggleStoreSelect(s.store) : handleStoreClick(s.store)}
+                >
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">{s.store}</span>
+                    <div className="flex items-center gap-2">
+                      {storeSelectMode && (
+                        <Checkbox
+                          checked={selectedStores.has(s.store)}
+                          onCheckedChange={() => toggleStoreSelect(s.store)}
+                          className="shrink-0"
+                        />
+                      )}
+                      <span className="text-sm font-medium">{s.store}</span>
+                    </div>
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-bold">${s.total.toFixed(2)}</span>
                       <Badge variant="secondary" className="text-xs">{s.percentage.toFixed(1)}%</Badge>
-                      <ChevronRightIcon className="h-4 w-4 text-muted-foreground" />
+                      {!storeSelectMode && <ChevronRightIcon className="h-4 w-4 text-muted-foreground" />}
                     </div>
                   </div>
                   <div className="h-2 rounded-full bg-muted overflow-hidden">
@@ -606,6 +734,45 @@ export default function Stats() {
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* Store Merge Dialog */}
+      <Dialog open={storeMergeDialogOpen} onOpenChange={(o) => !o && setStoreMergeDialogOpen(false)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Merge Stores</DialogTitle>
+            <DialogDescription>
+              Choose which store to keep. All receipts from the other {selectedStores.size - 1} store(s) will be reassigned to it.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 max-h-60 overflow-y-auto">
+            {Array.from(selectedStores).sort().map(store => (
+              <label
+                key={store}
+                className={cn(
+                  "flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors",
+                  survivorStore === store ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
+                )}
+              >
+                <input
+                  type="radio"
+                  name="survivorStore"
+                  checked={survivorStore === store}
+                  onChange={() => setSurvivorStore(store)}
+                  className="accent-primary"
+                />
+                <span className="text-sm font-medium">{store}</span>
+              </label>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStoreMergeDialogOpen(false)}>Cancel</Button>
+            <Button onClick={confirmStoreMerge} disabled={storeMerging || !survivorStore}>
+              <Merge className="h-4 w-4 mr-1" />
+              {storeMerging ? "Merging..." : "Merge"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
