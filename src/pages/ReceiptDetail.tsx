@@ -13,7 +13,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useSKUDetail } from "@/contexts/SKUDetailContext";
 import type { Tables } from "@/integrations/supabase/types";
-import { format } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { getReceiptStatus } from "@/lib/receipt-status";
 import ReceiptAddItemForm from "@/components/receipt/ReceiptAddItemForm";
 import ReceiptStatusBanner from "@/components/receipt/ReceiptStatusBanner";
@@ -73,7 +73,7 @@ export default function ReceiptDetail() {
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle className="text-lg capitalize">
-              {receipt.vendor === "sams" ? "Sam's Club" : "Walmart"}
+              {receipt.vendor === "sams" ? "Sam's Club" : receipt.vendor === "walmart" ? "Walmart" : (receipt.store_location || "Unknown Store")}
             </CardTitle>
             <div className="flex items-center gap-2">
               <Badge variant="secondary" className={`text-xs gap-1 ${status.badgeClass}`}>
@@ -105,7 +105,7 @@ export default function ReceiptDetail() {
           </div>
         </CardHeader>
         <CardContent className="space-y-1 text-sm">
-          <p>Date: {format(new Date(receipt.receipt_date), "MMM d, yyyy")}</p>
+          <p>Date: {format(parseISO(receipt.receipt_date), "MMM d, yyyy")}</p>
           {receipt.receipt_identifier && <p>ID: {receipt.receipt_identifier}</p>}
           {receipt.store_location && <p>Location: {receipt.store_location}</p>}
           <div className="flex gap-4 pt-2 font-medium">

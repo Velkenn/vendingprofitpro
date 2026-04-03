@@ -196,7 +196,7 @@ export default function Stats() {
 
     filteredItems.forEach(item => {
       const vendor = item.receipts.vendor;
-      const label = vendor === "sams" ? "Sam's Club" : vendor === "walmart" ? "Walmart" : vendor;
+      const label = vendor === "sams" ? "Sam's Club" : vendor === "walmart" ? "Walmart" : (item.receipts.store_location || "Unknown Store");
       const location = item.receipts.store_location;
       const key = location ? `${label} — ${location}` : label;
       storeMap.set(key, (storeMap.get(key) || 0) + item.line_total);

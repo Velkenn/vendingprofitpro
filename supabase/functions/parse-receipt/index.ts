@@ -420,6 +420,10 @@ function parseReceiptText(rawText: string): ParsedReceipt | null {
 
 const SYSTEM_PROMPT = `You are a receipt parser. Parse the raw receipt text and extract ALL line items from ANY store (Walmart, Sam's Club, Costco, Target, Kroger, etc.).
 
+STORE NAME EXTRACTION: Extract the store/vendor name STRICTLY from the receipt header, logo, or printed store name text. Do NOT guess or infer the store based on the products listed. If no store name can be clearly identified from the receipt text, return "Unknown Store" as the vendor.
+
+DATE EXTRACTION: Extract the date exactly as printed on the receipt. Do NOT infer or guess the date. If no date is found on the receipt, return null for receipt_date.
+
 For the vendor field, return the store name as it appears on the receipt (e.g. "Sam's Club", "Walmart", "Costco").
 For receipt_type, return one of: "in_store", "delivery", "scan_and_go", "online", or whatever best describes the receipt.
 
@@ -885,10 +889,9 @@ serve(async (req) => {
 
     // Map vendor string to enum value, store original in store_location if needed
     const vendorLower = (parsed.vendor || "").toLowerCase();
-    let vendorEnum: string = "sams"; // default
+    let vendorEnum: string = "other";
     if (vendorLower.includes("walmart")) vendorEnum = "walmart";
     else if (vendorLower.includes("sam")) vendorEnum = "sams";
-    // For non-sams/walmart stores, keep "sams" as default enum but preserve real name in store_location
 
     // Map receipt_type to enum if possible
     const rtLower = (parsed.receipt_type || "").toLowerCase();

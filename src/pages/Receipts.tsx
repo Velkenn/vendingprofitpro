@@ -62,26 +62,32 @@ export default function Receipts() {
       const receiptIds = receiptList.map(r => r.id);
       const { data: items } = await supabase
         .from("receipt_items")
-        .select("receipt_id, qty, pack_size, sku_id, is_personal, skus(sell_price)")
-        .in("receipt_id", receiptIds)
-        .eq("is_personal", false);
+        .select("receipt_id, qty, pack_size, sku_id, is_personal, line_total, skus(sell_price)")
+        .in("receipt_id", receiptIds);
 
       const profitMap = new Map<string, number>();
       if (items) {
-        // Sum estimated revenue per receipt
+        // Sum estimated revenue and business cost per receipt (exclude personal items)
         const revenueMap = new Map<string, number>();
+        const costMap = new Map<string, number>();
         for (const item of items) {
+          if (item.is_personal) continue;
+          // Accumulate business cost
+          const prevCost = costMap.get(item.receipt_id) || 0;
+          costMap.set(item.receipt_id, prevCost + Number(item.line_total || 0));
+          // Accumulate revenue
           const sellPrice = (item.skus as any)?.sell_price;
           if (sellPrice != null) {
             const prev = revenueMap.get(item.receipt_id) || 0;
             revenueMap.set(item.receipt_id, prev + Number(sellPrice) * (item.qty || 1) * ((item as any).pack_size || 1));
           }
         }
-        // Profit = estimated revenue - receipt total
+        // Profit = estimated revenue - business cost (excluding personal items)
         for (const r of receiptList) {
           const revenue = revenueMap.get(r.id);
-          if (revenue != null && r.total != null) {
-            profitMap.set(r.id, revenue - Number(r.total));
+          const cost = costMap.get(r.id);
+          if (revenue != null && cost != null) {
+            profitMap.set(r.id, revenue - cost);
           }
         }
       }
@@ -369,9 +375,9 @@ export default function Receipts() {
                             <Card key={r.id} className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate(`/receipts/${r.id}`)}>
                               <CardContent className="flex items-center gap-3 p-4">
                                 <div className="flex-1">
-                                  <p className="font-medium capitalize">{r.vendor === "sams" ? "Sam's Club" : "Walmart"}</p>
+                                  <p className="font-medium capitalize">{r.vendor === "sams" ? "Sam's Club" : r.vendor === "walmart" ? "Walmart" : (r.store_location || "Unknown Store")}</p>
                                   <p className="text-xs text-muted-foreground">
-                                    {format(new Date(r.receipt_date), "MMM d, yyyy")}
+                                    {format(parseISO(r.receipt_date), "MMM d, yyyy")}
                                     {r.item_count ? ` · ${r.item_count} items` : ""}
                                   </p>
                                 </div>
@@ -379,7 +385,7 @@ export default function Receipts() {
                                   <p className="font-bold">${Number(r.total || 0).toFixed(2)}</p>
                                   {receiptProfits.has(r.id) && (
                                     <p className={`text-xs font-semibold ${receiptProfits.get(r.id)! >= 0 ? "text-primary" : "text-destructive"}`}>
-                                      Est. {receiptProfits.get(r.id)! >= 0 ? "+" : ""}${receiptProfits.get(r.id)!.toFixed(2)}
+                                      Est. Profit {receiptProfits.get(r.id)! >= 0 ? "+" : ""}${receiptProfits.get(r.id)!.toFixed(2)}
                                     </p>
                                   )}
                                   <Badge variant="secondary" className={`text-xs gap-1 ${status.badgeClass}`}>

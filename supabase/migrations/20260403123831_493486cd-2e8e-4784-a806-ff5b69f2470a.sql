@@ -1,0 +1,1 @@
+ALTER TYPE vendor_type ADD VALUE 'other';
