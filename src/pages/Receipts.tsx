@@ -62,7 +62,7 @@ export default function Receipts() {
       const receiptIds = receiptList.map(r => r.id);
       const { data: items } = await supabase
         .from("receipt_items")
-        .select("receipt_id, qty, sku_id, is_personal, skus(sell_price)")
+        .select("receipt_id, qty, pack_size, sku_id, is_personal, skus(sell_price)")
         .in("receipt_id", receiptIds)
         .eq("is_personal", false);
 
