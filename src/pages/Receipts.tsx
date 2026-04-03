@@ -22,6 +22,7 @@ export default function Receipts() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [receipts, setReceipts] = useState<Tables<"receipts">[]>([]);
   const [loading, setLoading] = useState(true);
+  const [receiptProfits, setReceiptProfits] = useState<Map<string, number>>(new Map());
   
   // Upload state
   const [uploadExpanded, setUploadExpanded] = useState(false);
