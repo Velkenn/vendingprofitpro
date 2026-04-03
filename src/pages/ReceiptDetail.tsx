@@ -16,6 +16,7 @@ import { useSKUDetail } from "@/contexts/SKUDetailContext";
 import type { Tables } from "@/integrations/supabase/types";
 import { format, parseISO } from "date-fns";
 import { getReceiptStatus } from "@/lib/receipt-status";
+import { cleanStoreDisplay } from "@/lib/utils";
 import ReceiptAddItemForm from "@/components/receipt/ReceiptAddItemForm";
 import ReceiptStatusBanner from "@/components/receipt/ReceiptStatusBanner";
 
