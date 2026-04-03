@@ -75,9 +75,33 @@ export default function ReceiptDetail() {
       <Card className="border-0 shadow-sm mb-4">
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-lg capitalize">
-              {receipt.vendor === "sams" ? "Sam's Club" : receipt.vendor === "walmart" ? "Walmart" : (receipt.store_location || "Unknown Store")}
-            </CardTitle>
+            {editingStore ? (
+              <div className="flex items-center gap-2 flex-1 mr-2">
+                <Input
+                  value={storeValue}
+                  onChange={(e) => setStoreValue(e.target.value)}
+                  className="h-8 text-sm"
+                  autoFocus
+                />
+                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={async () => {
+                  const v = storeValue.trim();
+                  const vendor = v.toLowerCase().includes("sam") ? "sams" as const : v.toLowerCase().includes("walmart") ? "walmart" as const : "other" as const;
+                  await supabase.from("receipts").update({ store_location: v, vendor }).eq("id", id!);
+                  setEditingStore(false);
+                  loadData();
+                }}>
+                  <Check className="h-4 w-4" />
+                </Button>
+                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => setEditingStore(false)}>
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ) : (
+              <CardTitle className="text-lg capitalize flex items-center gap-1 cursor-pointer" onClick={() => { setStoreValue(receipt.store_location || ""); setEditingStore(true); }}>
+                {receipt.vendor === "sams" ? "Sam's Club" : receipt.vendor === "walmart" ? "Walmart" : (receipt.store_location || "Unknown Store")}
+                <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+              </CardTitle>
+            )}
             <div className="flex items-center gap-2">
               <Badge variant="secondary" className={`text-xs gap-1 ${status.badgeClass}`}>
                 <StatusIcon className={`h-3 w-3 ${status.animate ? "animate-spin" : ""}`} />
