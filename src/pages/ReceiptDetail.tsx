@@ -13,7 +13,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useSKUDetail } from "@/contexts/SKUDetailContext";
 import type { Tables } from "@/integrations/supabase/types";
-import { format } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { getReceiptStatus } from "@/lib/receipt-status";
 import ReceiptAddItemForm from "@/components/receipt/ReceiptAddItemForm";
 import ReceiptStatusBanner from "@/components/receipt/ReceiptStatusBanner";
