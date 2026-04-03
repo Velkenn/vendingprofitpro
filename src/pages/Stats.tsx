@@ -190,22 +190,82 @@ export default function Stats() {
     return { total_spend, total_revenue, total_profit, avg_unit_cost: total_units > 0 ? total_spend / total_units : 0, total_units };
   };
 
+  const extractCity = (location: string): string | null => {
+    // Try pattern: "..., City, ST ZIP" or "..., City, ST"
+    const parts = location.split(",").map(s => s.trim());
+    for (let i = parts.length - 1; i >= 0; i--) {
+      // Match "TX 75069" or "TX" — state abbreviation pattern
+      if (/^[A-Z]{2}(\s+\d{5}(-\d{4})?)?$/.test(parts[i]) && i > 0) {
+        const city = parts[i - 1].replace(/^\d+\s/, ""); // strip leading numbers
+        if (city && !/^\d/.test(city) && city.length > 1) {
+          return city.charAt(0).toUpperCase() + city.slice(1).toLowerCase();
+        }
+      }
+    }
+    // Fallback: look for a segment that looks like a city name (not an address with numbers)
+    for (let i = parts.length - 1; i >= 0; i--) {
+      const seg = parts[i];
+      if (seg && !/\d/.test(seg) && seg.length > 1 && !/^[A-Z]{2}$/.test(seg)) {
+        return seg.charAt(0).toUpperCase() + seg.slice(1).toLowerCase();
+      }
+    }
+    return null;
+  };
+
   const calculateStoreSpend = (filteredItems: ReceiptItemWithJoins[]): StoreSpend[] => {
-    const storeMap = new Map<string, number>();
+    // First pass: collect spend per storeName and track city frequencies
+    const storeCitySpend = new Map<string, Map<string, number>>(); // storeName -> city -> spend
+    const storeNoCitySpend = new Map<string, number>(); // storeName -> spend with no city
     let grandTotal = 0;
 
     filteredItems.forEach(item => {
       const vendor = item.receipts.vendor;
-      const label = vendor === "sams" ? "Sam's Club" : vendor === "walmart" ? "Walmart" : (item.receipts.store_location || "Unknown Store");
-      const location = item.receipts.store_location;
-      const key = location ? `${label} — ${location}` : label;
-      storeMap.set(key, (storeMap.get(key) || 0) + item.line_total);
+      const storeName = vendor === "sams" ? "Sam's Club" : vendor === "walmart" ? "Walmart" : (item.receipts.store_location?.split(",")[0]?.replace(/\d+\s*\w*\s*(DR|ST|AVE|BLVD|RD|LN|CT|WAY|PL|PKWY)\b.*/i, "").trim() || "Unknown Store");
+      const cleanStoreName = storeName.replace(/^(Sam's Club|Walmart)\s*/i, "").trim() ? 
+        (vendor === "sams" ? "Sam's Club" : vendor === "walmart" ? "Walmart" : storeName) : storeName;
+      const finalName = vendor === "sams" ? "Sam's Club" : vendor === "walmart" ? "Walmart" : (item.receipts.store_location || "Unknown Store").split(",")[0]?.trim() || "Unknown Store";
+      
+      const displayName = vendor === "sams" ? "Sam's Club" : vendor === "walmart" ? "Walmart" : (item.receipts.store_location || "Unknown Store");
+      const city = item.receipts.store_location ? extractCity(item.receipts.store_location) : null;
+      const sName = vendor === "sams" ? "Sam's Club" : vendor === "walmart" ? "Walmart" : displayName.split(",")[0]?.trim() || "Unknown Store";
+
       grandTotal += item.line_total;
+
+      if (city) {
+        if (!storeCitySpend.has(sName)) storeCitySpend.set(sName, new Map());
+        const cityMap = storeCitySpend.get(sName)!;
+        cityMap.set(city, (cityMap.get(city) || 0) + item.line_total);
+      } else {
+        storeNoCitySpend.set(sName, (storeNoCitySpend.get(sName) || 0) + item.line_total);
+      }
     });
 
-    return Array.from(storeMap.entries())
-      .map(([store, total]) => ({ store, total, percentage: grandTotal > 0 ? (total / grandTotal) * 100 : 0 }))
-      .sort((a, b) => b.total - a.total);
+    // Assign no-city spend to the most-visited city for that store
+    storeNoCitySpend.forEach((spend, sName) => {
+      const cityMap = storeCitySpend.get(sName);
+      if (cityMap && cityMap.size > 0) {
+        // Find most-visited city
+        let topCity = "";
+        let topSpend = 0;
+        cityMap.forEach((s, c) => { if (s > topSpend) { topCity = c; topSpend = s; } });
+        cityMap.set(topCity, (cityMap.get(topCity) || 0) + spend);
+      } else {
+        // No city data at all — just use store name alone
+        if (!storeCitySpend.has(sName)) storeCitySpend.set(sName, new Map());
+        const cityMap = storeCitySpend.get(sName)!;
+        cityMap.set("", (cityMap.get("") || 0) + spend);
+      }
+    });
+
+    const results: StoreSpend[] = [];
+    storeCitySpend.forEach((cityMap, sName) => {
+      cityMap.forEach((total, city) => {
+        const label = city ? `${sName} — ${city}` : sName;
+        results.push({ store: label, total, percentage: grandTotal > 0 ? (total / grandTotal) * 100 : 0 });
+      });
+    });
+
+    return results.sort((a, b) => b.total - a.total);
   };
 
   if (loading) {
