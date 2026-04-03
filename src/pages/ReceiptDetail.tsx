@@ -105,7 +105,7 @@ export default function ReceiptDetail() {
           </div>
         </CardHeader>
         <CardContent className="space-y-1 text-sm">
-          <p>Date: {format(new Date(receipt.receipt_date), "MMM d, yyyy")}</p>
+          <p>Date: {format(parseISO(receipt.receipt_date), "MMM d, yyyy")}</p>
           {receipt.receipt_identifier && <p>ID: {receipt.receipt_identifier}</p>}
           {receipt.store_location && <p>Location: {receipt.store_location}</p>}
           <div className="flex gap-4 pt-2 font-medium">

@@ -385,7 +385,7 @@ export default function Receipts() {
                                   <p className="font-bold">${Number(r.total || 0).toFixed(2)}</p>
                                   {receiptProfits.has(r.id) && (
                                     <p className={`text-xs font-semibold ${receiptProfits.get(r.id)! >= 0 ? "text-primary" : "text-destructive"}`}>
-                                      Est. {receiptProfits.get(r.id)! >= 0 ? "+" : ""}${receiptProfits.get(r.id)!.toFixed(2)}
+                                      Est. Profit {receiptProfits.get(r.id)! >= 0 ? "+" : ""}${receiptProfits.get(r.id)!.toFixed(2)}
                                     </p>
                                   )}
                                   <Badge variant="secondary" className={`text-xs gap-1 ${status.badgeClass}`}>

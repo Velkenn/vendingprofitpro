@@ -889,10 +889,9 @@ serve(async (req) => {
 
     // Map vendor string to enum value, store original in store_location if needed
     const vendorLower = (parsed.vendor || "").toLowerCase();
-    let vendorEnum: string = "sams"; // default
+    let vendorEnum: string = "other";
     if (vendorLower.includes("walmart")) vendorEnum = "walmart";
     else if (vendorLower.includes("sam")) vendorEnum = "sams";
-    // For non-sams/walmart stores, keep "sams" as default enum but preserve real name in store_location
 
     // Map receipt_type to enum if possible
     const rtLower = (parsed.receipt_type || "").toLowerCase();
