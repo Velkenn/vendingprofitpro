@@ -62,26 +62,32 @@ export default function Receipts() {
       const receiptIds = receiptList.map(r => r.id);
       const { data: items } = await supabase
         .from("receipt_items")
-        .select("receipt_id, qty, pack_size, sku_id, is_personal, skus(sell_price)")
-        .in("receipt_id", receiptIds)
-        .eq("is_personal", false);
+        .select("receipt_id, qty, pack_size, sku_id, is_personal, line_total, skus(sell_price)")
+        .in("receipt_id", receiptIds);
 
       const profitMap = new Map<string, number>();
       if (items) {
-        // Sum estimated revenue per receipt
+        // Sum estimated revenue and business cost per receipt (exclude personal items)
         const revenueMap = new Map<string, number>();
+        const costMap = new Map<string, number>();
         for (const item of items) {
+          if (item.is_personal) continue;
+          // Accumulate business cost
+          const prevCost = costMap.get(item.receipt_id) || 0;
+          costMap.set(item.receipt_id, prevCost + Number(item.line_total || 0));
+          // Accumulate revenue
           const sellPrice = (item.skus as any)?.sell_price;
           if (sellPrice != null) {
             const prev = revenueMap.get(item.receipt_id) || 0;
             revenueMap.set(item.receipt_id, prev + Number(sellPrice) * (item.qty || 1) * ((item as any).pack_size || 1));
           }
         }
-        // Profit = estimated revenue - receipt total
+        // Profit = estimated revenue - business cost (excluding personal items)
         for (const r of receiptList) {
           const revenue = revenueMap.get(r.id);
-          if (revenue != null && r.total != null) {
-            profitMap.set(r.id, revenue - Number(r.total));
+          const cost = costMap.get(r.id);
+          if (revenue != null && cost != null) {
+            profitMap.set(r.id, revenue - cost);
           }
         }
       }
