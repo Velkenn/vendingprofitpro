@@ -153,7 +153,7 @@ export default function Stats() {
     const displayName = vendor === "sams" ? "Sam's Club" : vendor === "walmart" ? "Walmart" : (item.receipts.store_location || "Unknown Store");
     const sName = vendor === "sams" ? "Sam's Club" : vendor === "walmart" ? "Walmart" : displayName.split(",")[0]?.trim() || "Unknown Store";
     const city = item.receipts.store_location ? extractCity(item.receipts.store_location) : null;
-    return city ? `${sName} — ${city}` : sName;
+    return cleanStoreDisplay(city ? `${sName} — ${city}` : sName);
   };
 
   const handleStoreClick = async (storeLabel: string) => {
