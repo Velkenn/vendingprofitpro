@@ -307,7 +307,7 @@ export default function Stats() {
     const results: StoreSpend[] = [];
     storeCitySpend.forEach((cityMap, sName) => {
       cityMap.forEach((total, city) => {
-        const label = city ? `${sName} — ${city}` : sName;
+        const label = cleanStoreDisplay(city ? `${sName} — ${city}` : sName);
         results.push({ store: label, total, percentage: grandTotal > 0 ? (total / grandTotal) * 100 : 0 });
       });
     });
