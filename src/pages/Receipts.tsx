@@ -62,7 +62,7 @@ export default function Receipts() {
       const receiptIds = receiptList.map(r => r.id);
       const { data: items } = await supabase
         .from("receipt_items")
-        .select("receipt_id, qty, sku_id, is_personal, skus(sell_price)")
+        .select("receipt_id, qty, pack_size, sku_id, is_personal, skus(sell_price)")
         .in("receipt_id", receiptIds)
         .eq("is_personal", false);
 
@@ -74,7 +74,7 @@ export default function Receipts() {
           const sellPrice = (item.skus as any)?.sell_price;
           if (sellPrice != null) {
             const prev = revenueMap.get(item.receipt_id) || 0;
-            revenueMap.set(item.receipt_id, prev + Number(sellPrice) * item.qty);
+            revenueMap.set(item.receipt_id, prev + Number(sellPrice) * (item.qty || 1) * ((item as any).pack_size || 1));
           }
         }
         // Profit = estimated revenue - receipt total
