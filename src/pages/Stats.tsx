@@ -149,9 +149,9 @@ export default function Stats() {
   const handleStoreClick = async (storeLabel: string) => {
     setSelectedStore(storeLabel);
     setStoreReceiptsLoading(true);
-    // Find matching receipt IDs from filtered items
+    const fi = getFilteredItems();
     const matchingReceiptIds = new Set<string>();
-    filteredItems.forEach(item => {
+    fi.forEach(item => {
       if (getStoreLabel(item) === storeLabel) matchingReceiptIds.add(item.receipt_id);
     });
     if (matchingReceiptIds.size > 0) {
