@@ -1,40 +1,42 @@
 
 
-## Fix Store Grouping — Group by Store Name + City
+## Assign Store to Receipt + Clickable Store Drill-Down
 
-### Problem
-The current `calculateStoreSpend` uses the full `store_location` string (including street address) as the grouping key, causing entries like "Sam's Club — Sam's Club 1670 W UNIVERSITY DR, Mckinney, TX 75069" and "Sam's Club — Sam's Club, 1670 W UNIVERSITY DR, Mckinney, TX 75069" to appear as separate entries.
+### 1. Editable store on receipt detail page (`src/pages/ReceiptDetail.tsx`)
 
-### Solution
-Extract just the **store name** and **city** from `store_location` to create the grouping key. Display format: `"Sam's Club — Mckinney"` or `"Walmart — Allen"`.
+Add a tappable store name that opens an inline edit mode or a select dropdown. The user can type or pick a store name, then save it to the `store_location` field (and optionally update `vendor` to match sams/walmart/other).
 
-### Implementation (single file: `src/pages/Stats.tsx`)
+- Make the store title (line 76) tappable — on tap, show an Input field pre-filled with current `store_location`
+- Add state: `editingStore`, `storeValue`
+- On save, update `receipts` table: set `store_location` to the new value, set `vendor` to "sams" if it contains "sam", "walmart" if it contains "walmart", else "other"
+- Show a pencil icon next to the store name to indicate editability
 
-Add a helper function `extractCity(location: string)` that:
-1. Splits the location string by commas
-2. Looks for a segment that matches a city pattern (word before state abbreviation like "TX", "CA", etc.) or simply takes the second-to-last segment (city typically appears before "STATE ZIP")
-3. Falls back: parse common patterns like `"..., CityName, ST ZIPCODE"` — grab the city part
-4. Trims and title-cases it
+### 2. Editable store on receipt cards in Receipts list (`src/pages/Receipts.tsx`)
 
-Update `calculateStoreSpend`:
-- Build key as `"${storeName} — ${city}"` instead of full address
-- For items with no `store_location`, group by store name alone
-- For items where city can't be extracted, find the most-visited city for that store name and group with it
+Not needed on the list — users can tap into the receipt detail to change the store. Keep the list read-only.
 
-**Before:**
-```
-Sam's Club — Sam's Club 1670 W UNIVERSITY DR, Mckinney, TX 75069    $3186
-Sam's Club — Sam's Club, 1670 W UNIVERSITY DR, Mckinney, TX 75069   $531
-Sam's Club — Sam's Club                                              $114
-```
+### 3. Clickable stores on Stats page (`src/pages/Stats.tsx`)
 
-**After:**
-```
-Sam's Club — Mckinney     $3831
-Walmart — Allen           $3297
-Walmart — Mckinney        $522
-```
+Make each store row in "Spend by Store" clickable. On tap, open a dialog/sheet showing all receipts from that store, grouped by month (same layout as Receipts tab).
+
+- Add state: `selectedStore: string | null`
+- When a store row is tapped, set `selectedStore` to the store label (e.g. "Sam's Club — Mckinney")
+- Render a Sheet (bottom sheet) with the store name as title
+- Inside the sheet, filter `items` to only those matching the store, extract unique receipt IDs, then fetch those receipts
+- Group receipts by month with collapsible sections (reuse same pattern from Receipts.tsx)
+- Most recent month expanded, older months collapsed
+- Each receipt card is tappable and navigates to `/receipts/:id`
+
+**Data approach**: The Stats page already has all `receipt_items` with joined `receipts` data. From `selectedStore`, derive the matching receipt IDs by matching vendor/store_location against the store label. Then fetch full receipt records for those IDs to display cards with totals and dates.
+
+### 4. Store receipts view data flow
+
+- From `filteredItems`, collect all receipt IDs where the store matches
+- Fetch those receipts from Supabase (or derive from existing data)
+- Group by month, show collapsible sections with count and total spend
+- Include est. profit per receipt (reuse existing profit map logic)
 
 ### Files changed
-- **Edit**: `src/pages/Stats.tsx` — rewrite `calculateStoreSpend` with city extraction and grouping logic
+- **Edit**: `src/pages/ReceiptDetail.tsx` — add inline store name editing with save
+- **Edit**: `src/pages/Stats.tsx` — make store rows clickable, add Sheet with filtered receipts grouped by month
 
