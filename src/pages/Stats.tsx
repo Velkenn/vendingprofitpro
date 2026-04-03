@@ -315,6 +315,91 @@ export default function Stats() {
     return results.sort((a, b) => b.total - a.total);
   };
 
+  const toggleStoreSelect = (store: string) => {
+    setSelectedStores(prev => {
+      const next = new Set(prev);
+      if (next.has(store)) next.delete(store);
+      else next.add(store);
+      return next;
+    });
+  };
+
+  const exitStoreSelectMode = () => {
+    setStoreSelectMode(false);
+    setSelectedStores(new Set());
+  };
+
+  const openStoreMergeDialog = () => {
+    if (selectedStores.size < 2) {
+      toast({ title: "Select at least 2 stores to merge", variant: "destructive" });
+      return;
+    }
+    const sorted = Array.from(selectedStores).sort();
+    setSurvivorStore(sorted[0]);
+    setStoreMergeDialogOpen(true);
+  };
+
+  const confirmStoreMerge = async () => {
+    if (!survivorStore || selectedStores.size < 2) return;
+    setStoreMerging(true);
+
+    const fi = getFilteredItems();
+    // Build a map: storeLabel -> list of receipt_ids
+    const labelToReceiptIds = new Map<string, Set<string>>();
+    fi.forEach(item => {
+      const label = getStoreLabel(item);
+      if (!labelToReceiptIds.has(label)) labelToReceiptIds.set(label, new Set());
+      labelToReceiptIds.get(label)!.add(item.receipt_id);
+    });
+
+    // Find the store_location value of a receipt belonging to the survivor label
+    const survivorReceiptIds = labelToReceiptIds.get(survivorStore);
+    let survivorLocation = survivorStore; // fallback
+    if (survivorReceiptIds && survivorReceiptIds.size > 0) {
+      const sampleItem = fi.find(i => survivorReceiptIds.has(i.receipt_id));
+      if (sampleItem?.receipts.store_location) survivorLocation = sampleItem.receipts.store_location;
+    }
+
+    // Determine vendor from survivor
+    const sampleSurvivorItem = fi.find(i => survivorReceiptIds?.has(i.receipt_id));
+    const survivorVendor = sampleSurvivorItem?.receipts.vendor || "other";
+
+    // Collect receipt IDs from non-survivor stores
+    const doomedReceiptIds: string[] = [];
+    selectedStores.forEach(label => {
+      if (label === survivorStore) return;
+      const ids = labelToReceiptIds.get(label);
+      if (ids) doomedReceiptIds.push(...Array.from(ids));
+    });
+
+    // Update receipts in batches
+    if (doomedReceiptIds.length > 0) {
+      const batchSize = 50;
+      for (let i = 0; i < doomedReceiptIds.length; i += batchSize) {
+        const batch = doomedReceiptIds.slice(i, i + batchSize);
+        await supabase
+          .from("receipts")
+          .update({ store_location: survivorLocation, vendor: survivorVendor })
+          .in("id", batch);
+      }
+    }
+
+    // Refresh items to reflect changes
+    const { data: refreshed } = await supabase
+      .from("receipt_items")
+      .select(`*, skus(sku_name, sell_price), receipts!inner(receipt_date, vendor, store_location)`)
+      .order("created_at", { ascending: false });
+    if (refreshed) setItems(refreshed as ReceiptItemWithJoins[]);
+
+    setStoreMerging(false);
+    setStoreMergeDialogOpen(false);
+    exitStoreSelectMode();
+    toast({
+      title: "Stores merged",
+      description: `${selectedStores.size - 1} store(s) merged into "${survivorStore}".`,
+    });
+  };
+
   if (loading) {
     return (
       <div className="px-4 pt-6">
