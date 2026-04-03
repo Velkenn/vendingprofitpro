@@ -74,7 +74,7 @@ export default function Receipts() {
           const sellPrice = (item.skus as any)?.sell_price;
           if (sellPrice != null) {
             const prev = revenueMap.get(item.receipt_id) || 0;
-            revenueMap.set(item.receipt_id, prev + Number(sellPrice) * item.qty);
+            revenueMap.set(item.receipt_id, prev + Number(sellPrice) * (item.qty || 1) * ((item as any).pack_size || 1));
           }
         }
         // Profit = estimated revenue - receipt total
