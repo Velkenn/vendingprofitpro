@@ -54,7 +54,39 @@ export default function Receipts() {
       .from("receipts")
       .select("*")
       .order("receipt_date", { ascending: false });
-    setReceipts(data || []);
+    const receiptList = data || [];
+    setReceipts(receiptList);
+
+    // Fetch receipt items with SKU sell_price for estimated profit
+    if (receiptList.length > 0) {
+      const receiptIds = receiptList.map(r => r.id);
+      const { data: items } = await supabase
+        .from("receipt_items")
+        .select("receipt_id, qty, sku_id, is_personal, skus(sell_price)")
+        .in("receipt_id", receiptIds)
+        .eq("is_personal", false);
+
+      const profitMap = new Map<string, number>();
+      if (items) {
+        // Sum estimated revenue per receipt
+        const revenueMap = new Map<string, number>();
+        for (const item of items) {
+          const sellPrice = (item.skus as any)?.sell_price;
+          if (sellPrice != null) {
+            const prev = revenueMap.get(item.receipt_id) || 0;
+            revenueMap.set(item.receipt_id, prev + Number(sellPrice) * item.qty);
+          }
+        }
+        // Profit = estimated revenue - receipt total
+        for (const r of receiptList) {
+          const revenue = revenueMap.get(r.id);
+          if (revenue != null && r.total != null) {
+            profitMap.set(r.id, revenue - Number(r.total));
+          }
+        }
+      }
+      setReceiptProfits(profitMap);
+    }
   }, [user]);
 
   useEffect(() => {
