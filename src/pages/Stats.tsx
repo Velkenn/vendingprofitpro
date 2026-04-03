@@ -58,6 +58,7 @@ type TimeFilter = "week" | "month" | "year" | "lifetime" | "q1" | "q2" | "q3" | 
 export default function Stats() {
   const { user } = useAuth();
   const { openSKUDetail } = useSKUDetail();
+  const { toast } = useToast();
   const navigate = useNavigate();
   const [items, setItems] = useState<ReceiptItemWithJoins[]>([]);
   const [machineSales, setMachineSales] = useState<MachineSale[]>([]);
@@ -67,6 +68,13 @@ export default function Stats() {
   const [selectedStore, setSelectedStore] = useState<string | null>(null);
   const [storeReceipts, setStoreReceipts] = useState<Tables<"receipts">[]>([]);
   const [storeReceiptsLoading, setStoreReceiptsLoading] = useState(false);
+
+  // Store merge state
+  const [storeSelectMode, setStoreSelectMode] = useState(false);
+  const [selectedStores, setSelectedStores] = useState<Set<string>>(new Set());
+  const [storeMergeDialogOpen, setStoreMergeDialogOpen] = useState(false);
+  const [survivorStore, setSurvivorStore] = useState<string | null>(null);
+  const [storeMerging, setStoreMerging] = useState(false);
 
   useEffect(() => { setPeriodOffset(0); }, [timeFilter]);
 
