@@ -565,9 +565,25 @@ export default function Stats() {
       {/* Store Spend Breakdown */}
       <Card>
         <CardHeader className="pb-1">
-          <div className="flex items-center gap-2">
-            <Store className="h-5 w-5 text-primary" />
-            <CardTitle className="text-lg">Spend by Store</CardTitle>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Store className="h-5 w-5 text-primary" />
+              <CardTitle className="text-lg">Spend by Store</CardTitle>
+            </div>
+            {!storeSelectMode ? (
+              <Button size="sm" variant="outline" onClick={() => setStoreSelectMode(true)}>
+                <ListChecks className="h-4 w-4 mr-1" />
+                Select
+              </Button>
+            ) : (
+              <div className="flex gap-2">
+                <Button size="sm" onClick={openStoreMergeDialog} disabled={selectedStores.size < 2}>
+                  <Merge className="h-4 w-4 mr-1" />
+                  Merge ({selectedStores.size})
+                </Button>
+                <Button size="sm" variant="outline" onClick={exitStoreSelectMode}>Cancel</Button>
+              </div>
+            )}
           </div>
         </CardHeader>
         <CardContent className="p-4 pt-0">
@@ -576,13 +592,30 @@ export default function Stats() {
           ) : (
             <div className="space-y-3">
               {storeSpend.map(s => (
-                <div key={s.store} className="space-y-1 cursor-pointer hover:bg-muted/50 rounded-lg p-2 -mx-2 transition-colors" onClick={() => handleStoreClick(s.store)}>
+                <div
+                  key={s.store}
+                  className={cn(
+                    "space-y-1 rounded-lg p-2 -mx-2 transition-colors",
+                    storeSelectMode && selectedStores.has(s.store) ? "ring-2 ring-primary bg-primary/5" : "",
+                    storeSelectMode ? "cursor-pointer" : "cursor-pointer hover:bg-muted/50"
+                  )}
+                  onClick={() => storeSelectMode ? toggleStoreSelect(s.store) : handleStoreClick(s.store)}
+                >
                   <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">{s.store}</span>
+                    <div className="flex items-center gap-2">
+                      {storeSelectMode && (
+                        <Checkbox
+                          checked={selectedStores.has(s.store)}
+                          onCheckedChange={() => toggleStoreSelect(s.store)}
+                          className="shrink-0"
+                        />
+                      )}
+                      <span className="text-sm font-medium">{s.store}</span>
+                    </div>
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-bold">${s.total.toFixed(2)}</span>
                       <Badge variant="secondary" className="text-xs">{s.percentage.toFixed(1)}%</Badge>
-                      <ChevronRightIcon className="h-4 w-4 text-muted-foreground" />
+                      {!storeSelectMode && <ChevronRightIcon className="h-4 w-4 text-muted-foreground" />}
                     </div>
                   </div>
                   <div className="h-2 rounded-full bg-muted overflow-hidden">
