@@ -1,15 +1,19 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { BarChart3, Package, DollarSign, TrendingUp, Store, ChevronLeft, ChevronRight, Banknote } from "lucide-react";
+import { BarChart3, Package, DollarSign, TrendingUp, Store, ChevronLeft, ChevronRight, Banknote, ChevronRight as ChevronRightIcon } from "lucide-react";
 import { useSKUDetail } from "@/contexts/SKUDetailContext";
 import type { Tables } from "@/integrations/supabase/types";
-import { startOfWeek, startOfMonth, startOfYear, endOfWeek, endOfMonth, endOfYear, isAfter, isBefore, subWeeks, subMonths, subYears, format } from "date-fns";
+import { startOfWeek, startOfMonth, startOfYear, endOfWeek, endOfMonth, endOfYear, isAfter, isBefore, subWeeks, subMonths, subYears, format, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { getReceiptStatus } from "@/lib/receipt-status";
 
 type ReceiptItemWithJoins = Tables<"receipt_items"> & {
   skus: Pick<Tables<"skus">, "sku_name" | "sell_price"> | null;
@@ -52,11 +56,15 @@ type TimeFilter = "week" | "month" | "year" | "lifetime" | "q1" | "q2" | "q3" | 
 export default function Stats() {
   const { user } = useAuth();
   const { openSKUDetail } = useSKUDetail();
+  const navigate = useNavigate();
   const [items, setItems] = useState<ReceiptItemWithJoins[]>([]);
   const [machineSales, setMachineSales] = useState<MachineSale[]>([]);
   const [loading, setLoading] = useState(true);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("lifetime");
   const [periodOffset, setPeriodOffset] = useState(0);
+  const [selectedStore, setSelectedStore] = useState<string | null>(null);
+  const [storeReceipts, setStoreReceipts] = useState<Tables<"receipts">[]>([]);
+  const [storeReceiptsLoading, setStoreReceiptsLoading] = useState(false);
 
   useEffect(() => { setPeriodOffset(0); }, [timeFilter]);
 
@@ -128,6 +136,35 @@ export default function Stats() {
       return format(range.start, "yyyy");
     }
     return "";
+  };
+
+  const getStoreLabel = (item: ReceiptItemWithJoins): string => {
+    const vendor = item.receipts.vendor;
+    const displayName = vendor === "sams" ? "Sam's Club" : vendor === "walmart" ? "Walmart" : (item.receipts.store_location || "Unknown Store");
+    const sName = vendor === "sams" ? "Sam's Club" : vendor === "walmart" ? "Walmart" : displayName.split(",")[0]?.trim() || "Unknown Store";
+    const city = item.receipts.store_location ? extractCity(item.receipts.store_location) : null;
+    return city ? `${sName} — ${city}` : sName;
+  };
+
+  const handleStoreClick = async (storeLabel: string) => {
+    setSelectedStore(storeLabel);
+    setStoreReceiptsLoading(true);
+    const fi = getFilteredItems();
+    const matchingReceiptIds = new Set<string>();
+    fi.forEach(item => {
+      if (getStoreLabel(item) === storeLabel) matchingReceiptIds.add(item.receipt_id);
+    });
+    if (matchingReceiptIds.size > 0) {
+      const { data } = await supabase
+        .from("receipts")
+        .select("*")
+        .in("id", Array.from(matchingReceiptIds))
+        .order("receipt_date", { ascending: false });
+      setStoreReceipts(data || []);
+    } else {
+      setStoreReceipts([]);
+    }
+    setStoreReceiptsLoading(false);
   };
 
   const getFilteredItems = (): ReceiptItemWithJoins[] => {
@@ -444,12 +481,13 @@ export default function Stats() {
           ) : (
             <div className="space-y-3">
               {storeSpend.map(s => (
-                <div key={s.store} className="space-y-1">
+                <div key={s.store} className="space-y-1 cursor-pointer hover:bg-muted/50 rounded-lg p-2 -mx-2 transition-colors" onClick={() => handleStoreClick(s.store)}>
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium">{s.store}</span>
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-bold">${s.total.toFixed(2)}</span>
                       <Badge variant="secondary" className="text-xs">{s.percentage.toFixed(1)}%</Badge>
+                      <ChevronRightIcon className="h-4 w-4 text-muted-foreground" />
                     </div>
                   </div>
                   <div className="h-2 rounded-full bg-muted overflow-hidden">
@@ -500,6 +538,74 @@ export default function Stats() {
           )}
         </CardContent>
       </Card>
+
+      {/* Store Receipts Sheet */}
+      <Sheet open={!!selectedStore} onOpenChange={(open) => { if (!open) setSelectedStore(null); }}>
+        <SheetContent side="bottom" className="h-[85vh] overflow-y-auto scroll-touch">
+          <SheetHeader>
+            <SheetTitle>{selectedStore}</SheetTitle>
+          </SheetHeader>
+          <div className="mt-4 space-y-3">
+            {storeReceiptsLoading ? (
+              <p className="text-sm text-muted-foreground text-center py-8">Loading receipts...</p>
+            ) : storeReceipts.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-8">No receipts found.</p>
+            ) : (() => {
+              const grouped = new Map<string, Tables<"receipts">[]>();
+              for (const r of storeReceipts) {
+                const key = format(parseISO(r.receipt_date), "yyyy-MM");
+                if (!grouped.has(key)) grouped.set(key, []);
+                grouped.get(key)!.push(r);
+              }
+              const months = Array.from(grouped.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+              return months.map(([monthKey, monthReceipts], idx) => {
+                const monthLabel = format(parseISO(monthKey + "-01"), "MMMM yyyy");
+                const monthTotal = monthReceipts.reduce((s, r) => s + Number(r.total || 0), 0);
+                return (
+                  <Collapsible key={monthKey} defaultOpen={idx === 0}>
+                    <CollapsibleTrigger className="flex items-center justify-between w-full px-2 py-2 rounded-lg hover:bg-muted/50 transition-colors group">
+                      <div className="flex items-center gap-2">
+                        <ChevronRightIcon className="h-4 w-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
+                        <span className="font-semibold text-sm">{monthLabel}</span>
+                        <Badge variant="secondary" className="text-xs">{monthReceipts.length}</Badge>
+                      </div>
+                      <span className="text-sm font-semibold text-muted-foreground">${monthTotal.toFixed(2)}</span>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <div className="space-y-2 mt-2">
+                        {monthReceipts.map((r) => {
+                          const status = getReceiptStatus(r.parse_status);
+                          const StatusIcon = status.icon;
+                          return (
+                            <Card key={r.id} className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow" onClick={() => { setSelectedStore(null); navigate(`/receipts/${r.id}`); }}>
+                              <CardContent className="flex items-center gap-3 p-4">
+                                <div className="flex-1">
+                                  <p className="font-medium capitalize">{r.vendor === "sams" ? "Sam's Club" : r.vendor === "walmart" ? "Walmart" : (r.store_location || "Unknown Store")}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {format(parseISO(r.receipt_date), "MMM d, yyyy")}
+                                    {r.item_count ? ` · ${r.item_count} items` : ""}
+                                  </p>
+                                </div>
+                                <div className="text-right flex flex-col items-end gap-1">
+                                  <p className="font-bold">${Number(r.total || 0).toFixed(2)}</p>
+                                  <Badge variant="secondary" className={`text-xs gap-1 ${status.badgeClass}`}>
+                                    <StatusIcon className={`h-3 w-3 ${status.animate ? "animate-spin" : ""}`} />
+                                    {status.label}
+                                  </Badge>
+                                </div>
+                              </CardContent>
+                            </Card>
+                          );
+                        })}
+                      </div>
+                    </CollapsibleContent>
+                  </Collapsible>
+                );
+              });
+            })()}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
