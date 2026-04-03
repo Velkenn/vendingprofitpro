@@ -481,12 +481,13 @@ export default function Stats() {
           ) : (
             <div className="space-y-3">
               {storeSpend.map(s => (
-                <div key={s.store} className="space-y-1">
+                <div key={s.store} className="space-y-1 cursor-pointer hover:bg-muted/50 rounded-lg p-2 -mx-2 transition-colors" onClick={() => handleStoreClick(s.store)}>
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium">{s.store}</span>
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-bold">${s.total.toFixed(2)}</span>
                       <Badge variant="secondary" className="text-xs">{s.percentage.toFixed(1)}%</Badge>
+                      <ChevronRightIcon className="h-4 w-4 text-muted-foreground" />
                     </div>
                   </div>
                   <div className="h-2 rounded-full bg-muted overflow-hidden">
