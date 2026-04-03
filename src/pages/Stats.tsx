@@ -734,6 +734,45 @@ export default function Stats() {
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* Store Merge Dialog */}
+      <Dialog open={storeMergeDialogOpen} onOpenChange={(o) => !o && setStoreMergeDialogOpen(false)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Merge Stores</DialogTitle>
+            <DialogDescription>
+              Choose which store to keep. All receipts from the other {selectedStores.size - 1} store(s) will be reassigned to it.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 max-h-60 overflow-y-auto">
+            {Array.from(selectedStores).sort().map(store => (
+              <label
+                key={store}
+                className={cn(
+                  "flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors",
+                  survivorStore === store ? "border-primary bg-primary/5" : "border-border hover:bg-muted/50"
+                )}
+              >
+                <input
+                  type="radio"
+                  name="survivorStore"
+                  checked={survivorStore === store}
+                  onChange={() => setSurvivorStore(store)}
+                  className="accent-primary"
+                />
+                <span className="text-sm font-medium">{store}</span>
+              </label>
+            ))}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setStoreMergeDialogOpen(false)}>Cancel</Button>
+            <Button onClick={confirmStoreMerge} disabled={storeMerging || !survivorStore}>
+              <Merge className="h-4 w-4 mr-1" />
+              {storeMerging ? "Merging..." : "Merge"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
