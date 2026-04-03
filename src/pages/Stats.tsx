@@ -56,11 +56,15 @@ type TimeFilter = "week" | "month" | "year" | "lifetime" | "q1" | "q2" | "q3" | 
 export default function Stats() {
   const { user } = useAuth();
   const { openSKUDetail } = useSKUDetail();
+  const navigate = useNavigate();
   const [items, setItems] = useState<ReceiptItemWithJoins[]>([]);
   const [machineSales, setMachineSales] = useState<MachineSale[]>([]);
   const [loading, setLoading] = useState(true);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("lifetime");
   const [periodOffset, setPeriodOffset] = useState(0);
+  const [selectedStore, setSelectedStore] = useState<string | null>(null);
+  const [storeReceipts, setStoreReceipts] = useState<Tables<"receipts">[]>([]);
+  const [storeReceiptsLoading, setStoreReceiptsLoading] = useState(false);
 
   useEffect(() => { setPeriodOffset(0); }, [timeFilter]);
 
