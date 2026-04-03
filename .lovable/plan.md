@@ -1,55 +1,52 @@
 
 
-## Dashboard Redesign + Native Mobile Feel
+## PWA Setup + Receipt Estimated Profit
 
-### Part 1: Rewrite `src/pages/Index.tsx`
+### Part 1: Progressive Web App
 
-Complete rewrite of the dashboard with these sections top-to-bottom:
+**New file: `public/manifest.json`**
+- `name`: "VendingTrackr", `short_name`: "VendingTrackr"
+- `theme_color`: "#1a7a3c", `background_color`: "#f4f9f6"
+- `display`: "standalone", `start_url`: "/", `scope`: "/"
+- Icons: reference the existing `favicon.ico` at 192x192 and 512x512 (will generate simple PNG icons)
 
-1. **Greeting header** — "Good morning" / "Good afternoon" / "Good evening" based on `new Date().getHours()`. No username shown.
+**Edit: `index.html`**
+- Add `<link rel="manifest" href="/manifest.json">` in `<head>`
+- Add `<meta name="theme-color" content="#1a7a3c">`
+- Add `<meta name="apple-mobile-web-app-capable" content="yes">`
+- Add `<meta name="apple-mobile-web-app-status-bar-style" content="default">`
 
-2. **Hero profit card** — Full-width card with dark green gradient background. Large green text showing this month's profit (revenue from `machine_sales` minus spend from `receipt_items`). Below it, two smaller numbers: "Revenue" and "Spend" in muted text.
+**Edit: `src/main.tsx`**
+- Add service worker registration guard (no `vite-plugin-pwa`):
+  - Only register when NOT in iframe and NOT on preview host
+  - Register `/sw.js`
 
-3. **Two action buttons side-by-side** — Green filled "Upload Receipt" button (triggers same file upload + parse flow currently in Receipts page, reuse same logic inline) and an outlined "Log Sales" button. Upload Receipt opens the file picker and runs the upload/parse flow with progress bar inline on the dashboard. Log Sales opens a Drawer/Sheet bottom sheet.
+**New file: `public/sw.js`**
+- Minimal service worker with cache-first for static assets, network-first for API calls
+- Cache name includes a version string for easy updates
+- Handles `install`, `activate` (cleanup old caches), and `fetch` events
 
-4. **Log Sales bottom sheet** — Uses `Sheet` component (side="bottom"). First step: dropdown `Select` to pick a machine from user's `machines` table. Second step: date, cash, credit inputs + save button. Insert into `machine_sales`. No navigation away from dashboard.
+**New files: `public/icon-192.png`, `public/icon-512.png`**
+- Generate simple green square icons with "VT" text using a script
 
-5. **"Needs Attention" section** — Horizontal bar chart of bottom 8 SKUs by profit this month. Each bar shows SKU name and profit amount. Red/orange bars for negative or low profit. Uses simple CSS bars (no chart library needed).
+### Part 2: Receipt Estimated Profit
 
-6. **Compact stat row** — Three stats in a row: units purchased this month, avg profit margin this month, best machine this month (by revenue from `machine_sales`).
+**Concept**: For each receipt, calculate estimated profit = (sum of sell_price × qty for each receipt_item's linked SKU) - receipt total. Display as green text on each receipt card.
 
-7. **Inline alerts** — Only render if `needsReviewCount > 0` or `needsPriceCount > 0`. Clean card with warning icon, tappable rows. Hidden entirely when both are zero.
+**Edit: `src/pages/Receipts.tsx`**
+- After loading receipts, fetch all `receipt_items` for those receipts with their linked SKU sell_price:
+  ```
+  receipt_items: id, receipt_id, qty, sku_id, line_total
+  skus: sell_price (joined via sku_id)
+  ```
+- Build a `Map<receiptId, estimatedProfit>` where profit = sum(sell_price × qty) - receipt.total
+- On each receipt card, below the total, show: `Est. Profit: $X.XX` in green text (or hide if no SKU data)
 
-8. **Remove** — Business Spend card, Personal Spend card, Top 5 SKUs section, old welcome message.
-
-### Data fetching changes
-- Switch from weekly to monthly time window (`startOfMonth` / `endOfMonth`)
-- Fetch `machine_sales` for total revenue calculation
-- Fetch all non-personal `receipt_items` this month for spend + SKU profit ranking
-- Fetch `machines` list for the Log Sales dropdown and best machine stat
-- Bottom 8 SKUs: same profit calc as before but sorted ascending, sliced to 8
-
-### Part 2: Native mobile feel — global CSS + meta tag changes
-
-**`index.html`** — Update viewport meta tag:
-```html
-<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-```
-
-**`src/index.css`** — Add to base layer:
-```css
-* { touch-action: manipulation; }
-html { -webkit-text-size-adjust: 100%; }
-input, textarea, select { font-size: 16px; }
-```
-
-Add to scrollable containers utility:
-```css
-.scroll-touch { -webkit-overflow-scrolling: touch; }
-```
+**Where receipt cards appear**: Only `Receipts.tsx` renders the receipt list cards. The dashboard and other pages don't show individual receipt cards, so only this file needs the change.
 
 ### Files changed
-- **Rewrite**: `src/pages/Index.tsx` — new dashboard layout + Log Sales sheet
-- **Edit**: `index.html` — viewport meta tag
-- **Edit**: `src/index.css` — touch/zoom prevention, 16px input font size
+- **New**: `public/manifest.json`, `public/sw.js`, `public/icon-192.png`, `public/icon-512.png`
+- **Edit**: `index.html` — manifest link + meta tags
+- **Edit**: `src/main.tsx` — conditional SW registration
+- **Edit**: `src/pages/Receipts.tsx` — fetch receipt items with SKU sell_price, display estimated profit on each card
 
