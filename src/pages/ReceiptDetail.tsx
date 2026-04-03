@@ -99,7 +99,7 @@ export default function ReceiptDetail() {
               </div>
             ) : (
               <CardTitle className="text-lg capitalize flex items-center gap-1 cursor-pointer" onClick={() => { setStoreValue(receipt.store_location || ""); setEditingStore(true); }}>
-                {receipt.vendor === "sams" ? "Sam's Club" : receipt.vendor === "walmart" ? "Walmart" : (receipt.store_location || "Unknown Store")}
+                {cleanStoreDisplay(receipt.vendor === "sams" ? "Sam's Club" : receipt.vendor === "walmart" ? "Walmart" : (receipt.store_location || "Unknown Store"))}
                 <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
               </CardTitle>
             )}
