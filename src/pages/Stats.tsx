@@ -167,7 +167,7 @@ export default function Stats() {
     setStoreReceiptsLoading(false);
   };
 
-
+  const getFilteredItems = (): ReceiptItemWithJoins[] => {
     const range = getFilterRange(timeFilter, periodOffset);
     if (!range) return items;
     return items.filter(item => {
