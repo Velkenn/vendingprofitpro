@@ -29,6 +29,8 @@ export default function ReceiptDetail() {
   const [items, setItems] = useState<Tables<"receipt_items">[]>([]);
   const [showAddForm, setShowAddForm] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [editingStore, setEditingStore] = useState(false);
+  const [storeValue, setStoreValue] = useState("");
 
   const loadData = () => {
     if (!id) return;
