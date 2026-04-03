@@ -73,7 +73,7 @@ export default function ReceiptDetail() {
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between">
             <CardTitle className="text-lg capitalize">
-              {receipt.vendor === "sams" ? "Sam's Club" : "Walmart"}
+              {receipt.vendor === "sams" ? "Sam's Club" : receipt.vendor === "walmart" ? "Walmart" : (receipt.store_location || "Unknown Store")}
             </CardTitle>
             <div className="flex items-center gap-2">
               <Badge variant="secondary" className={`text-xs gap-1 ${status.badgeClass}`}>
