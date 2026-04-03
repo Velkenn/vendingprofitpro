@@ -12,6 +12,7 @@ import type { Tables } from "@/integrations/supabase/types";
 import { format, parseISO } from "date-fns";
 import { getReceiptStatus } from "@/lib/receipt-status";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { cleanStoreDisplay } from "@/lib/utils";
 
 type UploadState = "idle" | "uploading" | "parsing" | "done" | "error";
 
