@@ -1,42 +1,39 @@
 
 
-## Assign Store to Receipt + Clickable Store Drill-Down
+## Support Image Receipt Parsing (Same as PDFs)
 
-### 1. Editable store on receipt detail page (`src/pages/ReceiptDetail.tsx`)
+### Problem
+Currently, when a user uploads an image (JPG, PNG, etc.), the edge function tries to extract text using `pdfjs-serverless`, which fails with "Invalid PDF structure." Images need to be sent directly to the user's AI provider as vision input instead of going through PDF text extraction.
 
-Add a tappable store name that opens an inline edit mode or a select dropdown. The user can type or pick a store name, then save it to the `store_location` field (and optionally update `vendor` to match sams/walmart/other).
+### Solution
+Detect whether the uploaded file is an image or PDF. For images, skip PDF text extraction entirely and send the image directly to the AI provider's vision/multimodal API. All three supported providers (Anthropic, OpenAI, Google) support image inputs.
 
-- Make the store title (line 76) tappable — on tap, show an Input field pre-filled with current `store_location`
-- Add state: `editingStore`, `storeValue`
-- On save, update `receipts` table: set `store_location` to the new value, set `vendor` to "sams" if it contains "sam", "walmart" if it contains "walmart", else "other"
-- Show a pencil icon next to the store name to indicate editability
+### Implementation (single file: `supabase/functions/parse-receipt/index.ts`)
 
-### 2. Editable store on receipt cards in Receipts list (`src/pages/Receipts.tsx`)
+**1. Add image detection helper**
+- Check file bytes for magic bytes (JPEG: `FF D8`, PNG: `89 50 4E 47`) or check the file extension from `file_path`
+- Add a helper: `isImageFile(bytes: Uint8Array, filePath: string): boolean`
 
-Not needed on the list — users can tap into the receipt detail to change the store. Keep the list read-only.
+**2. Add `parseImageWithUserProvider` function**
+- Convert image bytes to base64
+- For each provider, send the image as a vision input alongside the same `SYSTEM_PROMPT` and `EXTRACT_TOOL`:
+  - **Anthropic**: Use `content: [{ type: "image", source: { type: "base64", media_type, data } }, { type: "text", text: prompt }]`
+  - **OpenAI**: Use `content: [{ type: "image_url", image_url: { url: "data:image/...;base64,..." } }, { type: "text", text: prompt }]`
+  - **Google**: Use `contents: [{ parts: [{ inlineData: { mimeType, data } }, { text: prompt }] }]`
+- Return the same `ParsedReceipt` structure as `parseWithUserProvider`
 
-### 3. Clickable stores on Stats page (`src/pages/Stats.tsx`)
+**3. Update main handler flow (line ~795-810)**
+- After downloading the file, check if it's an image
+- If image:
+  - Require AI config (no regex fallback for images — can't extract text without AI)
+  - If no AI configured, fail with a clear message: "Image receipts require an AI provider. Please configure one in Settings → AI Settings."
+  - Call `parseImageWithUserProvider` instead of `extractPdfText` + `parseWithUserProvider`
+- If PDF: keep existing flow unchanged
+- Everything after parsing (SKU matching, normalization, insert) stays the same
 
-Make each store row in "Spend by Store" clickable. On tap, open a dialog/sheet showing all receipts from that store, grouped by month (same layout as Receipts tab).
-
-- Add state: `selectedStore: string | null`
-- When a store row is tapped, set `selectedStore` to the store label (e.g. "Sam's Club — Mckinney")
-- Render a Sheet (bottom sheet) with the store name as title
-- Inside the sheet, filter `items` to only those matching the store, extract unique receipt IDs, then fetch those receipts
-- Group receipts by month with collapsible sections (reuse same pattern from Receipts.tsx)
-- Most recent month expanded, older months collapsed
-- Each receipt card is tappable and navigates to `/receipts/:id`
-
-**Data approach**: The Stats page already has all `receipt_items` with joined `receipts` data. From `selectedStore`, derive the matching receipt IDs by matching vendor/store_location against the store label. Then fetch full receipt records for those IDs to display cards with totals and dates.
-
-### 4. Store receipts view data flow
-
-- From `filteredItems`, collect all receipt IDs where the store matches
-- Fetch those receipts from Supabase (or derive from existing data)
-- Group by month, show collapsible sections with count and total spend
-- Include est. profit per receipt (reuse existing profit map logic)
+**4. Base64 chunking consideration**
+- Images can be large; encode to base64 in one shot (Deno handles this fine for typical receipt photos ~1-5MB)
 
 ### Files changed
-- **Edit**: `src/pages/ReceiptDetail.tsx` — add inline store name editing with save
-- **Edit**: `src/pages/Stats.tsx` — make store rows clickable, add Sheet with filtered receipts grouped by month
+- **Edit**: `supabase/functions/parse-receipt/index.ts` — add image detection, vision-based parsing for all 3 providers, route images through vision API in main handler
 
