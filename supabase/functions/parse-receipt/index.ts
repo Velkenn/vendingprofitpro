@@ -1051,18 +1051,8 @@ serve(async (req) => {
       }
     }
 
-    // Get the receipt user_id
-    const { data: receiptData } = await supabase
-      .from("receipts")
-      .select("user_id")
-      .eq("id", receipt_id)
-      .single();
-
-    if (!receiptData) {
-      return new Response(JSON.stringify({ error: "Receipt not found" }), {
-        status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    // Reuse receiptForAI as receiptData (same query)
+    const receiptData = receiptForAI;
 
     let extractedItems = parsed.items || [];
     const headerCount = parsed.item_count || extractedItems.length;
