@@ -607,6 +607,161 @@ async function parseWithUserProvider(
   throw new Error(`Unknown provider: ${provider}`);
 }
 
+// ─── IMAGE DETECTION ──────────────────────────────────────────────
+function isImageFile(bytes: Uint8Array, filePath: string): boolean {
+  // Check magic bytes: JPEG (FF D8), PNG (89 50 4E 47)
+  if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xD8) return true;
+  if (bytes.length >= 4 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) return true;
+  // Fallback: check file extension
+  const ext = filePath.split(".").pop()?.toLowerCase() || "";
+  return ["jpg", "jpeg", "png", "webp", "heic", "heif", "gif", "bmp"].includes(ext);
+}
+
+function getImageMimeType(bytes: Uint8Array, filePath: string): string {
+  if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xD8) return "image/jpeg";
+  if (bytes.length >= 4 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4E && bytes[3] === 0x47) return "image/png";
+  const ext = filePath.split(".").pop()?.toLowerCase() || "";
+  const mimeMap: Record<string, string> = {
+    jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png",
+    webp: "image/webp", gif: "image/gif", bmp: "image/bmp",
+    heic: "image/heic", heif: "image/heif",
+  };
+  return mimeMap[ext] || "image/jpeg";
+}
+
+// Base64 encode bytes
+function bytesToBase64(bytes: Uint8Array): string {
+  const CHUNK_SIZE = 32768;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+    const chunk = bytes.subarray(i, Math.min(i + CHUNK_SIZE, bytes.length));
+    binary += String.fromCharCode(...chunk);
+  }
+  return btoa(binary);
+}
+
+// ─── IMAGE PARSING WITH USER'S AI PROVIDER (VISION) ──────────────
+async function parseImageWithUserProvider(
+  imageBytes: Uint8Array,
+  filePath: string,
+  provider: string,
+  apiKey: string,
+  model: string
+): Promise<any> {
+  const mimeType = getImageMimeType(imageBytes, filePath);
+  const base64Data = bytesToBase64(imageBytes);
+  const userPrompt = "Parse ALL items from this receipt image. Extract every single line item with quantities, prices, store name, date, and totals.";
+
+  if (provider === "anthropic") {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 16384,
+        system: SYSTEM_PROMPT,
+        tools: [{
+          name: "extract_receipt",
+          description: EXTRACT_TOOL.function.description,
+          input_schema: EXTRACT_TOOL.function.parameters,
+        }],
+        tool_choice: { type: "tool", name: "extract_receipt" },
+        messages: [{
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: mimeType, data: base64Data } },
+            { type: "text", text: userPrompt },
+          ],
+        }],
+      }),
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`AI_ERROR:${res.status}:${t}`);
+    }
+    const result = await res.json();
+    const toolUse = result.content?.find((c: any) => c.type === "tool_use");
+    if (!toolUse) throw new Error("AI did not return structured data");
+    return toolUse.input;
+  }
+
+  if (provider === "openai") {
+    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 16384,
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: [
+              { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Data}` } },
+              { type: "text", text: userPrompt },
+            ],
+          },
+        ],
+        tools: [EXTRACT_TOOL],
+        tool_choice: { type: "function", function: { name: "extract_receipt" } },
+      }),
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`AI_ERROR:${res.status}:${t}`);
+    }
+    const result = await res.json();
+    const toolCall = result.choices?.[0]?.message?.tool_calls?.[0];
+    if (!toolCall) throw new Error("AI did not return structured data");
+    return parseToolCallResult(toolCall);
+  }
+
+  if (provider === "google") {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+          contents: [{
+            parts: [
+              { inlineData: { mimeType, data: base64Data } },
+              { text: userPrompt },
+            ],
+          }],
+          tools: [{
+            functionDeclarations: [{
+              name: "extract_receipt",
+              description: EXTRACT_TOOL.function.description,
+              parameters: EXTRACT_TOOL.function.parameters,
+            }],
+          }],
+          toolConfig: { functionCallingConfig: { mode: "ANY", allowedFunctionNames: ["extract_receipt"] } },
+          generationConfig: { maxOutputTokens: 16384 },
+        }),
+      }
+    );
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`AI_ERROR:${res.status}:${t}`);
+    }
+    const result = await res.json();
+    const fc = result.candidates?.[0]?.content?.parts?.find((p: any) => p.functionCall);
+    if (!fc) throw new Error("AI did not return structured data");
+    return fc.functionCall.args;
+  }
+
+  throw new Error(`Unknown provider: ${provider}`);
+}
+
 // Fuzzy match: check if two product names are similar enough to be the same SKU
 function fuzzyMatchSku(name1: string, name2: string): boolean {
   const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
