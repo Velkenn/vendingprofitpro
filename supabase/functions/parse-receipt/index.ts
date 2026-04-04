@@ -947,24 +947,9 @@ serve(async (req) => {
     const arrayBuffer = await fileData.arrayBuffer();
     const bytes = new Uint8Array(arrayBuffer);
 
-    // PHASE 1: Extract raw text from PDF
-    console.log("Phase 1: Extracting text from PDF with pdfjs...");
-    let rawText: string;
-    try {
-      rawText = await extractPdfText(bytes);
-      console.log(`Phase 1 complete: extracted ${rawText.length} chars`);
-    } catch (pdfErr) {
-      console.error("PDF text extraction failed:", pdfErr);
-      // If pdfjs fails, we can't do vision OCR without complex provider-specific logic
-      // Just fail — pdfjs should handle most PDFs
-      await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-      return new Response(JSON.stringify({ error: "PDF text extraction failed. Please ensure the file is a valid PDF." }), {
-        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // PHASE 2: Parse text — AI first if configured, regex as fallback
-    console.log("Phase 2: Looking up user AI config...");
+    // Detect if file is an image or PDF
+    const imageFile = isImageFile(bytes, file_path);
+    console.log(`File type: ${imageFile ? "IMAGE" : "PDF"}`);
 
     // Get receipt user_id for AI config lookup
     const { data: receiptForAI } = await supabase
@@ -982,14 +967,20 @@ serve(async (req) => {
     const aiConfig = await getUserAIConfig(supabase, receiptForAI.user_id, encryptionKey);
     let parsed: any = null;
 
-    if (aiConfig) {
-      // AI is configured — use it as the primary parser
-      console.log(`Using AI (${aiConfig.provider}/${aiConfig.model}) as primary parser...`);
+    if (imageFile) {
+      // IMAGE PATH: requires AI provider with vision capabilities
+      if (!aiConfig) {
+        await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
+        return new Response(JSON.stringify({ error: "Image receipts require an AI provider. Please configure one in Settings → AI Settings." }), {
+          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      console.log(`Parsing image with AI vision (${aiConfig.provider}/${aiConfig.model})...`);
       try {
-        parsed = await parseWithUserProvider(rawText, aiConfig.provider, aiConfig.apiKey, aiConfig.model);
-        console.log(`AI succeeded: ${parsed.items?.length || 0} items`);
+        parsed = await parseImageWithUserProvider(bytes, file_path, aiConfig.provider, aiConfig.apiKey, aiConfig.model);
+        console.log(`AI vision succeeded: ${parsed.items?.length || 0} items`);
       } catch (aiErr: any) {
-        console.error("AI error:", aiErr.message);
+        console.error("AI vision error:", aiErr.message);
         await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
         const msg = aiErr.message || "";
         if (msg.includes("AI_ERROR:429")) {
@@ -1002,22 +993,61 @@ serve(async (req) => {
             status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
-        return new Response(JSON.stringify({ error: `Parsing failed with ${aiConfig.provider}. Check your API key in Settings.` }), {
+        return new Response(JSON.stringify({ error: `Image parsing failed with ${aiConfig.provider}. Check your API key in Settings.` }), {
           status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
     } else {
-      // No AI configured — fall back to regex
-      console.log("No AI provider configured, falling back to regex parser...");
-      parsed = parseReceiptText(rawText);
-      if (parsed && parsed.items.length > 0) {
-        console.log(`Regex parser found ${parsed.items.length} items`);
-      } else {
-        console.log("Regex parser found 0 items");
+      // PDF PATH: extract text first, then parse
+      console.log("Phase 1: Extracting text from PDF with pdfjs...");
+      let rawText: string;
+      try {
+        rawText = await extractPdfText(bytes);
+        console.log(`Phase 1 complete: extracted ${rawText.length} chars`);
+      } catch (pdfErr) {
+        console.error("PDF text extraction failed:", pdfErr);
         await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-        return new Response(JSON.stringify({ error: "No AI provider configured and regex parsing failed. Please set up an AI provider in Settings → AI Settings." }), {
-          status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        return new Response(JSON.stringify({ error: "PDF text extraction failed. Please ensure the file is a valid PDF." }), {
+          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
+      }
+
+      console.log("Phase 2: Parsing extracted text...");
+      if (aiConfig) {
+        console.log(`Using AI (${aiConfig.provider}/${aiConfig.model}) as primary parser...`);
+        try {
+          parsed = await parseWithUserProvider(rawText, aiConfig.provider, aiConfig.apiKey, aiConfig.model);
+          console.log(`AI succeeded: ${parsed.items?.length || 0} items`);
+        } catch (aiErr: any) {
+          console.error("AI error:", aiErr.message);
+          await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
+          const msg = aiErr.message || "";
+          if (msg.includes("AI_ERROR:429")) {
+            return new Response(JSON.stringify({ error: `Rate limited by ${aiConfig.provider}. Please try again later.` }), {
+              status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+          if (msg.includes("AI_ERROR:401") || msg.includes("AI_ERROR:403")) {
+            return new Response(JSON.stringify({ error: `Invalid or expired ${aiConfig.provider} API key. Please check your key in Settings → AI Settings.` }), {
+              status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+          return new Response(JSON.stringify({ error: `Parsing failed with ${aiConfig.provider}. Check your API key in Settings.` }), {
+            status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      } else {
+        console.log("No AI provider configured, falling back to regex parser...");
+        parsed = parseReceiptText(rawText);
+        if (parsed && parsed.items.length > 0) {
+          console.log(`Regex parser found ${parsed.items.length} items`);
+        } else {
+          console.log("Regex parser found 0 items");
+          await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
+          return new Response(JSON.stringify({ error: "No AI provider configured and regex parsing failed. Please set up an AI provider in Settings → AI Settings." }), {
+            status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
       }
     }
 
