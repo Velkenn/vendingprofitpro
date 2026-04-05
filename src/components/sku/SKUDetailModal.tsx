@@ -62,7 +62,7 @@ export default function SKUDetailModal({ skuId, open, onClose }: Props) {
       supabase.from("skus").select("*").eq("id", skuId).single(),
       supabase
         .from("receipt_items")
-        .select("id, qty, pack_size, unit_cost, line_total, receipts!inner(receipt_date, vendor)")
+        .select("id, qty, pack_size, unit_cost, line_total, receipts!inner(receipt_date, vendor, store_location)")
         .eq("sku_id", skuId)
         .order("created_at", { ascending: false }),
     ]).then(([skuRes, itemsRes]) => {
@@ -75,7 +75,7 @@ export default function SKUDetailModal({ skuId, open, onClose }: Props) {
         pack_size: number | null;
         unit_cost: number | null;
         line_total: number;
-        receipts: { receipt_date: string; vendor: string };
+        receipts: { receipt_date: string; vendor: string; store_location: string | null };
       }>;
 
       const sellPrice = skuData?.sell_price ? Number(skuData.sell_price) : null;
