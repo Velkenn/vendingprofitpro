@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from "react-router-dom";
-import { LayoutDashboard, Receipt, Package, BarChart3, Settings, Monitor } from "lucide-react";
+import { LayoutDashboard, Receipt, BarChart3, Settings, Monitor, MessageCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const navItems = [
