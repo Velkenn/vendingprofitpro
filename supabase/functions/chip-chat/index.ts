@@ -12,6 +12,21 @@ interface AIConfig {
   model: string;
 }
 
+async function fetchAllRows(supabase: any, table: string, query: any) {
+  const allRows: any[] = [];
+  let offset = 0;
+  const pageSize = 1000;
+  while (true) {
+    const { data, error } = await query.range(offset, offset + pageSize - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    allRows.push(...data);
+    if (data.length < pageSize) break;
+    offset += pageSize;
+  }
+  return allRows;
+}
+
 async function getAIConfig(supabase: any, userId: string): Promise<AIConfig> {
   const { data } = await supabase
     .from("ai_provider_settings")
@@ -39,23 +54,16 @@ async function getAIConfig(supabase: any, userId: string): Promise<AIConfig> {
 }
 
 async function fetchUserContext(supabase: any, userId: string) {
-  const [skusRes, receiptsRes, itemsRes, machinesRes, salesRes, memoriesRes] = await Promise.all([
-    supabase.from("skus").select("id, sku_name, sell_price, category, rebuy_status, default_is_personal").eq("user_id", userId),
-    supabase.from("receipts").select("id, vendor, receipt_date, store_location, total, tax, subtotal, item_count").eq("user_id", userId).order("receipt_date", { ascending: false }),
-    supabase.from("receipt_items").select("receipt_id, raw_name, qty, pack_size, line_total, unit_cost, is_personal, sku_id").eq("user_id", userId),
-    supabase.from("machines").select("id, name, location").eq("user_id", userId),
-    supabase.from("machine_sales").select("machine_id, date, cash_amount, credit_amount").eq("user_id", userId).order("date", { ascending: false }),
-    supabase.from("chip_memories").select("memory_text, created_at").eq("user_id", userId).order("created_at", { ascending: false }),
+  const [skus, receipts, items, machines, sales, memories] = await Promise.all([
+    fetchAllRows(supabase, "skus", supabase.from("skus").select("id, sku_name, sell_price, category, rebuy_status, default_is_personal").eq("user_id", userId)),
+    fetchAllRows(supabase, "receipts", supabase.from("receipts").select("id, vendor, receipt_date, store_location, total, tax, subtotal, item_count").eq("user_id", userId).order("receipt_date", { ascending: false })),
+    fetchAllRows(supabase, "receipt_items", supabase.from("receipt_items").select("receipt_id, raw_name, qty, pack_size, line_total, unit_cost, is_personal, sku_id").eq("user_id", userId)),
+    fetchAllRows(supabase, "machines", supabase.from("machines").select("id, name, location").eq("user_id", userId)),
+    fetchAllRows(supabase, "machine_sales", supabase.from("machine_sales").select("machine_id, date, cash_amount, credit_amount").eq("user_id", userId).order("date", { ascending: false })),
+    fetchAllRows(supabase, "chip_memories", supabase.from("chip_memories").select("memory_text, created_at").eq("user_id", userId).order("created_at", { ascending: false })),
   ]);
 
-  return {
-    skus: skusRes.data || [],
-    receipts: receiptsRes.data || [],
-    items: itemsRes.data || [],
-    machines: machinesRes.data || [],
-    sales: salesRes.data || [],
-    memories: memoriesRes.data || [],
-  };
+  return { skus, receipts, items, machines, sales, memories };
 }
 
 function buildSystemPrompt(ctx: any): string {
@@ -63,9 +71,15 @@ function buildSystemPrompt(ctx: any): string {
     `- ${s.sku_name} | sell: $${s.sell_price ?? "?"} | status: ${s.rebuy_status} | cat: ${s.category ?? "?"} | personal: ${s.default_is_personal}`
   ).join("\n");
 
-  const receiptSummary = ctx.receipts.slice(0, 200).map((r: any) =>
+  const receiptSummary = ctx.receipts.map((r: any) =>
     `- ${r.receipt_date} | ${r.vendor} | ${r.store_location ?? "?"} | total: $${r.total ?? "?"} | items: ${r.item_count ?? "?"}`
   ).join("\n");
+
+  // Build a receipt date lookup
+  const receiptDateMap: Record<string, string> = {};
+  for (const r of ctx.receipts) {
+    receiptDateMap[r.id] = r.receipt_date;
+  }
 
   // Build SKU cost data from receipt items
   const skuCosts: Record<string, { totalCost: number; totalUnits: number; name: string }> = {};
@@ -87,10 +101,15 @@ function buildSystemPrompt(ctx: any): string {
     return `- ${data.name}: ${data.totalUnits} units bought, avg cost/unit $${avgCostPerUnit?.toFixed(2) ?? "?"}, sell $${sellPrice ?? "?"}, profit/unit $${profitPerUnit}`;
   }).join("\n");
 
+  // Purchase detail: individual items with dates
+  const purchaseDetail = ctx.items.map((item: any) => {
+    const date = receiptDateMap[item.receipt_id] ?? "?";
+    const units = (item.qty || 1) * (item.pack_size || 1);
+    return `- ${date} | ${item.raw_name} | qty: ${item.qty}, pack: ${item.pack_size ?? 1}, units: ${units}, cost: $${item.line_total}, personal: ${item.is_personal}`;
+  }).join("\n");
+
   const machineSummary = ctx.machines.map((m: any) => {
-    const mSales = ctx.sales
-      .filter((s: any) => s.machine_id === m.id)
-      .slice(0, 200);
+    const mSales = ctx.sales.filter((s: any) => s.machine_id === m.id);
     const totalRev = mSales.reduce((sum: number, s: any) => sum + Number(s.cash_amount) + Number(s.credit_amount), 0);
     const salesLines = mSales.map((s: any) => {
       const cash = Number(s.cash_amount);
@@ -114,8 +133,11 @@ ${skuSummary || "No SKUs yet."}
 ## SKU Profit Analysis
 ${skuProfitLines || "No purchase data yet."}
 
-## Receipts (${ctx.receipts.length} total, showing most recent 200)
+## Receipts (${ctx.receipts.length} total)
 ${receiptSummary || "No receipts yet."}
+
+## Purchase Detail (${ctx.items.length} total line items with dates)
+${purchaseDetail || "No purchase items yet."}
 
 ## Machines & Revenue
 ${machineSummary || "No machines yet."}
@@ -128,6 +150,7 @@ ${memorySummary}
 - When answering about profit, always clarify: profit = (sell_price × units) - cost.
 - Proactively compare time periods when relevant (e.g. "That's up 12% from last month").
 - Reference saved memories when they're relevant to the question.
+- You can filter purchases by date, month, or any time period using the Purchase Detail section above.
 - If you don't have enough data to answer, say so clearly.
 - Use markdown formatting for readability (bold, lists, tables when helpful).
 - Be encouraging but honest about performance.
@@ -171,8 +194,6 @@ async function streamWithOpenAI(apiKey: string, model: string, messages: any[]) 
 }
 
 async function streamWithGoogle(apiKey: string, model: string, messages: any[]) {
-  // Use Lovable gateway format for Google models too if using user's own key
-  // Google's native streaming API is complex, so we convert to non-streaming
   const systemMsg = messages.find((m: any) => m.role === "system")?.content || "";
   const userMsgs = messages.filter((m: any) => m.role !== "system").map((m: any) => ({
     role: m.role === "assistant" ? "model" : "user",
@@ -235,7 +256,6 @@ serve(async (req) => {
       throw new Error("Unsupported provider");
     }
 
-    // For Anthropic and Google, we need to transform the stream to OpenAI-compatible SSE
     if (aiConfig.provider === "anthropic") {
       const reader = streamRes.body!.getReader();
       const decoder = new TextDecoder();
@@ -287,7 +307,6 @@ serve(async (req) => {
       return new Response(stream, { headers: { ...corsHeaders, "Content-Type": "text/event-stream" } });
     }
 
-    // OpenAI and Lovable already return OpenAI-compatible SSE
     return new Response(streamRes.body, {
       headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
     });
