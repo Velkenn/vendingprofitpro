@@ -71,6 +71,21 @@ export default function SettingsPage() {
     <div className="px-4 pt-6">
       <h1 className="mb-4 text-2xl font-bold tracking-tight">Settings</h1>
 
+      {/* SKUs Link */}
+      <Card className="border-0 shadow-sm mb-4">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium text-sm">SKU Management</p>
+              <p className="text-xs text-muted-foreground">View and manage your product catalog</p>
+            </div>
+            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => navigate("/skus")}>
+              <Package className="h-4 w-4" /> View SKUs
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* AI Settings */}
       <Card className="border-0 shadow-sm mb-4">
         <CardContent className="p-4">
