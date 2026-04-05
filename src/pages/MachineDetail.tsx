@@ -56,8 +56,8 @@ function getFilterRange(filter: TimeFilter, offset: number, weekStartsOn: 0|1|2|
   return null;
 }
 
-function getPeriodLabel(filter: TimeFilter, offset: number): string {
-  const range = getFilterRange(filter, offset);
+function getPeriodLabel(filter: TimeFilter, offset: number, weekStartsOn: 0|1|2|3|4|5|6 = 0): string {
+  const range = getFilterRange(filter, offset, weekStartsOn);
   if (!range) return "";
   if (filter === "week") return `${format(range.start, "MMM d")}–${format(range.end, "MMM d, yyyy")}`;
   if (filter === "month") return format(range.start, "MMMM yyyy");
