@@ -57,13 +57,25 @@ const chipConversations = [
 ];
 
 export default function Landing() {
+  const { session, loading } = useAuth();
+  const navigate = useNavigate();
   const [scrolled, setScrolled] = useState(false);
+
+  useEffect(() => {
+    if (!loading && session) {
+      navigate("/app", { replace: true });
+    }
+  }, [session, loading, navigate]);
 
   useEffect(() => {
     const h = () => setScrolled(window.scrollY > 20);
     window.addEventListener("scroll", h);
     return () => window.removeEventListener("scroll", h);
   }, []);
+
+  if (loading || session) {
+    return <div className="flex min-h-screen items-center justify-center text-muted-foreground">Loading...</div>;
+  }
 
   return (
     <div className="min-h-screen" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
