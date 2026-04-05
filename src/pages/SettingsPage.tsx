@@ -27,6 +27,7 @@ function downloadCsv(filename: string, rows: Record<string, unknown>[]) {
 export default function SettingsPage() {
   const { user, signOut } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [weekStart, setWeekStart] = useState("0");
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
 
