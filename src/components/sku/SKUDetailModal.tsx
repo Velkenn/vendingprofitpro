@@ -250,6 +250,9 @@ export default function SKUDetailModal({ skuId, open, onClose }: Props) {
                                 <div>
                                   <p className="text-xs font-medium">
                                     {format(new Date(p.date), "MMM d, yyyy")}
+                                    <span className="ml-1.5 font-normal text-muted-foreground">
+                                      {p.store_location || (p.vendor === "sams" ? "Sam's Club" : p.vendor === "walmart" ? "Walmart" : "Other")}
+                                    </span>
                                   </p>
                                   <p className="text-xs text-muted-foreground">
                                     {p.qty}× {p.pack_size ? `${p.pack_size}pk` : "1pk"} = {p.units} units
