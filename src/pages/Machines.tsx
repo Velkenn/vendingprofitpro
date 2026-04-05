@@ -231,7 +231,7 @@ export default function Machines() {
                   )}
                 </div>
                 <div className="text-right">
-                  <p className="text-xs text-muted-foreground">{timeFilter === "lifetime" ? "All time" : getPeriodLabel(timeFilter, periodOffset)}</p>
+                  <p className="text-xs text-muted-foreground">{timeFilter === "lifetime" ? "All time" : getPeriodLabel(timeFilter, periodOffset, weekStartDay)}</p>
                   <p className="text-sm font-semibold">${(revByMachine[m.id] || 0).toFixed(2)}</p>
                 </div>
               </CardContent>
