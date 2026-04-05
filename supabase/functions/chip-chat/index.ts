@@ -88,9 +88,16 @@ function buildSystemPrompt(ctx: any): string {
   }).join("\n");
 
   const machineSummary = ctx.machines.map((m: any) => {
-    const mSales = ctx.sales.filter((s: any) => s.machine_id === m.id);
+    const mSales = ctx.sales
+      .filter((s: any) => s.machine_id === m.id)
+      .slice(0, 200);
     const totalRev = mSales.reduce((sum: number, s: any) => sum + Number(s.cash_amount) + Number(s.credit_amount), 0);
-    return `- ${m.name} (${m.location ?? "?"}): ${mSales.length} sales logged, total revenue $${totalRev.toFixed(2)}`;
+    const salesLines = mSales.map((s: any) => {
+      const cash = Number(s.cash_amount);
+      const credit = Number(s.credit_amount);
+      return `  - ${s.date}: cash $${cash.toFixed(2)}, credit $${credit.toFixed(2)}, total $${(cash + credit).toFixed(2)}`;
+    }).join("\n");
+    return `- ${m.name} (${m.location ?? "?"}):\n${salesLines || "  No sales logged."}\n  Summary: ${mSales.length} entries, total revenue $${totalRev.toFixed(2)}`;
   }).join("\n");
 
   const memorySummary = ctx.memories.length > 0
