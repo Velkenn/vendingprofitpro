@@ -5,7 +5,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { LogOut, FileDown, Zap } from "lucide-react";
+import { LogOut, FileDown, Zap, Package } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import AISettingsDialog from "@/components/settings/AISettingsDialog";
 
 const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -26,6 +27,7 @@ function downloadCsv(filename: string, rows: Record<string, unknown>[]) {
 export default function SettingsPage() {
   const { user, signOut } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [weekStart, setWeekStart] = useState("0");
   const [aiSettingsOpen, setAiSettingsOpen] = useState(false);
 
@@ -68,6 +70,21 @@ export default function SettingsPage() {
   return (
     <div className="px-4 pt-6">
       <h1 className="mb-4 text-2xl font-bold tracking-tight">Settings</h1>
+
+      {/* SKUs Link */}
+      <Card className="border-0 shadow-sm mb-4">
+        <CardContent className="p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="font-medium text-sm">SKU Management</p>
+              <p className="text-xs text-muted-foreground">View and manage your product catalog</p>
+            </div>
+            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => navigate("/skus")}>
+              <Package className="h-4 w-4" /> View SKUs
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* AI Settings */}
       <Card className="border-0 shadow-sm mb-4">

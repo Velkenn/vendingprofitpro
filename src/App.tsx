@@ -22,6 +22,7 @@ import SettingsPage from "@/pages/SettingsPage";
 import Export from "@/pages/Export";
 import Machines from "@/pages/Machines";
 import MachineDetail from "@/pages/MachineDetail";
+import Chat from "@/pages/Chat";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -51,6 +52,7 @@ function AppRoutes() {
         <Route path="/profit-leaderboard" element={<ProfitLeaderboard />} />
         <Route path="/machines" element={<Machines />} />
         <Route path="/machines/:id" element={<MachineDetail />} />
+        <Route path="/chat" element={<Chat />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/export" element={<Export />} />
       </Route>

@@ -47,6 +47,27 @@ export type Database = {
         }
         Relationships: []
       }
+      chip_memories: {
+        Row: {
+          created_at: string
+          id: string
+          memory_text: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          memory_text: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          memory_text?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       machine_sales: {
         Row: {
           cash_amount: number
