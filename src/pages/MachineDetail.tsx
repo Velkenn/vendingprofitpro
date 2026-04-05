@@ -39,11 +39,11 @@ const TIME_FILTERS: { value: TimeFilter; label: string }[] = [
   { value: "lifetime", label: "Lifetime" },
 ];
 
-function getFilterRange(filter: TimeFilter, offset: number): { start: Date; end: Date } | null {
+function getFilterRange(filter: TimeFilter, offset: number, weekStartsOn: 0|1|2|3|4|5|6 = 0): { start: Date; end: Date } | null {
   const now = new Date();
   if (filter === "week") {
-    const base = subWeeks(startOfWeek(now, { weekStartsOn: 0 }), -offset);
-    return { start: base, end: endOfWeek(base, { weekStartsOn: 0 }) };
+    const base = subWeeks(startOfWeek(now, { weekStartsOn }), -offset);
+    return { start: base, end: endOfWeek(base, { weekStartsOn }) };
   }
   if (filter === "month") {
     const base = subMonths(startOfMonth(now), -offset);
