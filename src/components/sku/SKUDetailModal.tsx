@@ -277,7 +277,7 @@ export default function SKUDetailModal({ skuId, open, onClose }: Props) {
                                   <p className="text-xs font-medium">
                                     {format(new Date(p.date), "MMM d, yyyy")}
                                     <span className="ml-1.5 font-normal text-muted-foreground">
-                                      {p.store_location || (p.vendor === "sams" ? "Sam's Club" : p.vendor === "walmart" ? "Walmart" : "Other")}
+                                      {shortStore(p.store_location, p.vendor)}
                                     </span>
                                   </p>
                                   <p className="text-xs text-muted-foreground">
