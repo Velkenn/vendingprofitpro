@@ -219,7 +219,7 @@ export default function Machines() {
             <Card
               key={m.id}
               className="cursor-pointer hover:bg-muted/50 transition-colors"
-              onClick={() => navigate(`/machines/${m.id}`)}
+              onClick={() => navigate(`/app/machines/${m.id}`)}
             >
               <CardContent className="px-4 py-3 flex items-center justify-between">
                 <div>

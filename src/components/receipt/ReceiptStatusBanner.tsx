@@ -38,7 +38,7 @@ export default function ReceiptStatusBanner({ status }: Props) {
           <p className="font-medium text-accent">Some items may need corrections.</p>
           <p className="text-muted-foreground mt-0.5">
             Review flagged items or add missing ones below.{" "}
-            <Button variant="link" className="h-auto p-0 text-xs" onClick={() => navigate("/needs-review")}>
+            <Button variant="link" className="h-auto p-0 text-xs" onClick={() => navigate("/app/needs-review")}>
               Go to review queue →
             </Button>
           </p>

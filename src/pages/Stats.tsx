@@ -713,7 +713,7 @@ export default function Stats() {
                           const status = getReceiptStatus(r.parse_status);
                           const StatusIcon = status.icon;
                           return (
-                            <Card key={r.id} className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow" onClick={() => { setSelectedStore(null); navigate(`/receipts/${r.id}`); }}>
+                            <Card key={r.id} className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow" onClick={() => { setSelectedStore(null); navigate(`/app/receipts/${r.id}`); }}>
                               <CardContent className="flex items-center gap-3 p-4">
                                 <div className="flex-1">
                                   <p className="font-medium capitalize">{cleanStoreDisplay(r.vendor === "sams" ? "Sam's Club" : r.vendor === "walmart" ? "Walmart" : (r.store_location || "Unknown Store"))}</p>

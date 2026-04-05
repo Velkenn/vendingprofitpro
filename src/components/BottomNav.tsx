@@ -3,12 +3,12 @@ import { LayoutDashboard, Receipt, BarChart3, Settings, Monitor, MessageCircle }
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { path: "/", icon: LayoutDashboard, label: "Home" },
-  { path: "/chat", icon: MessageCircle, label: "Chat" },
-  { path: "/stats", icon: BarChart3, label: "Stats" },
-  { path: "/machines", icon: Monitor, label: "Machines" },
-  { path: "/receipts", icon: Receipt, label: "Receipts" },
-  { path: "/settings", icon: Settings, label: "More" },
+  { path: "/app", icon: LayoutDashboard, label: "Home" },
+  { path: "/app/chat", icon: MessageCircle, label: "Chat" },
+  { path: "/app/stats", icon: BarChart3, label: "Stats" },
+  { path: "/app/machines", icon: Monitor, label: "Machines" },
+  { path: "/app/receipts", icon: Receipt, label: "Receipts" },
+  { path: "/app/settings", icon: Settings, label: "More" },
 ];
 
 export default function BottomNav() {
@@ -19,7 +19,7 @@ export default function BottomNav() {
     <nav className="fixed bottom-0 left-0 right-0 z-50 border-t bg-card safe-bottom">
       <div className="mx-auto flex max-w-lg items-center justify-around py-1">
         {navItems.map(({ path, icon: Icon, label }) => {
-          const active = path === "/" ? location.pathname === "/" : location.pathname.startsWith(path);
+          const active = path === "/app" ? location.pathname === "/app" : location.pathname.startsWith(path);
           return (
             <button
               key={path}
@@ -29,7 +29,7 @@ export default function BottomNav() {
                 active ? "text-primary font-semibold" : "text-muted-foreground"
               )}
             >
-              <Icon className={cn("h-5 w-5", path === "/stats" && "h-6 w-6")} />
+              <Icon className={cn("h-5 w-5", path === "/app/stats" && "h-6 w-6")} />
               <span>{label}</span>
             </button>
           );

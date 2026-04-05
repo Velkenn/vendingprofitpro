@@ -267,7 +267,7 @@ export default function MachineDetail() {
     <div className="px-4 pt-4 pb-4 max-w-lg mx-auto space-y-4">
       {/* Header */}
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="icon" onClick={() => navigate("/machines")}>
+        <Button variant="ghost" size="icon" onClick={() => navigate("/app/machines")}>
           <ArrowLeft className="h-5 w-5" />
         </Button>
         <div className="flex-1">
