@@ -322,7 +322,7 @@ export default function Chat() {
       </div>
 
       {/* Input */}
-      <form onSubmit={handleSubmit} className="px-4 pb-2 pt-1 border-t bg-background">
+      <form onSubmit={handleSubmit} className="px-4 pb-4 pt-2 border-t bg-background">
         <div className="flex gap-2">
           <Input
             value={input}
