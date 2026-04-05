@@ -1,26 +1,85 @@
 
 
-## Remove All Data Caps from Chip's System Prompt
+## Landing Page + App Routing Restructure
 
-### Problem
-There are three caps limiting Chip's data access:
-1. **Receipts**: `ctx.receipts.slice(0, 200)` on line 66 — only shows 200 most recent receipts
-2. **Machine sales**: `.slice(0, 200)` on line 93 — only 200 sales per machine
-3. **Supabase default limit**: All queries return max 1000 rows by default (no `.range()` or pagination)
+### Overview
+Create a new public landing page at `/` based on the PDF design, and move all authenticated app routes under `/app/*`. CTA buttons ("Start Tracking Free", "Try It Free", sign up links) will navigate to `/auth`.
 
-### Fix (`supabase/functions/chip-chat/index.ts`)
+### Architecture Change
 
-**1. Remove `.slice()` caps** — delete the `slice(0, 200)` on receipts (line 66) and machine sales (line 93). Show all data in the prompt.
+```text
+Before:
+  /         → Dashboard (protected)
+  /auth     → Login/Signup
+  /stats    → Stats (protected)
+  ...
 
-**2. Paginate large tables past the 1000-row Supabase limit** — for `receipts`, `receipt_items`, and `machine_sales`, implement a fetch loop that pages through all rows using `.range(offset, offset+999)` until no more rows are returned. SKUs, machines, and memories are unlikely to exceed 1000 rows but can use the same pattern for safety.
+After:
+  /         → Landing Page (public)
+  /auth     → Login/Signup  
+  /app      → Dashboard (protected)
+  /app/stats → Stats (protected)
+  ...
+```
 
-**3. Update the prompt header** — change "showing most recent 200" to show the actual total count.
+### Technical Details
 
-**4. Add purchase detail section** — include the date-enriched item list (from the previously approved but unimplemented plan) so Chip can answer "how many X did I buy in February" by cross-referencing items with receipt dates. No artificial cap.
+**1. New file: `src/pages/Landing.tsx`**
+- Recreate the full landing page from the PDF as a React component using Tailwind CSS (not inline styles)
+- Sections: Nav bar, Hero, Action buttons preview, Stats row, Problem/Solution cards, Features grid, Chip AI section, How it works steps, Tech stack, Quote/testimonial, Final CTA, Footer
+- Import Fraunces font via Google Fonts in `index.html`
+- All CTA links ("Start Tracking Free", nav "Try It Free") use `<Link to="/auth">` or `<a href="/auth">`
+- FadeIn animation using IntersectionObserver
+- Sticky nav that changes style on scroll (green bg → frosted white)
+- Mobile-first, responsive
 
-### Trade-off
-More data in the prompt means higher token usage and cost per message. For users with very large datasets (thousands of receipts), prompts could get large. This is acceptable since the user explicitly wants full database access.
+**2. Edit: `src/App.tsx`**
+- Import Landing page
+- Add public route: `<Route path="/" element={<Landing />} />`
+- Wrap all protected routes under `/app` prefix:
+  - `/app` → Index (dashboard)
+  - `/app/receipts` → Receipts
+  - `/app/stats` → Stats
+  - `/app/machines` → Machines
+  - etc.
+- Update `ProtectedRoute` redirect from `/auth` stays the same
+- After login, redirect to `/app` instead of `/`
+
+**3. Edit: `src/contexts/AuthContext.tsx`** (if it handles post-login redirect)
+- Update any redirect from `/` to `/app`
+
+**4. Edit: `src/pages/Auth.tsx`**
+- Change post-login redirect from `/` to `/app`
+- Landing page already links to `/auth` for signup
+
+**5. Edit: `src/components/BottomNav.tsx`**
+- Update all nav links from `/` to `/app`, `/stats` to `/app/stats`, etc.
+
+**6. Edit: `src/components/NavLink.tsx`**
+- Update any hardcoded paths if present
+
+**7. Edit: `src/pages/SettingsPage.tsx`**
+- Update any internal links (SKUs → `/app/skus`, etc.)
+
+**8. Edit: `index.html`**
+- Add Fraunces font import
+
+**9. Edit: All page components with internal `navigate()` or `<Link>` calls**
+- Update paths to include `/app` prefix (ReceiptDetail, Stats, Machines, MachineDetail, Chat, etc.)
 
 ### Files changed
-- **Edit**: `supabase/functions/chip-chat/index.ts` — remove slice caps, add pagination for all queries, add purchase detail section with dates
+- **New**: `src/pages/Landing.tsx` — full landing page from PDF design
+- **Edit**: `index.html` — add Fraunces font
+- **Edit**: `src/App.tsx` — add landing route at `/`, move protected routes under `/app`
+- **Edit**: `src/pages/Auth.tsx` — redirect to `/app` after login
+- **Edit**: `src/components/BottomNav.tsx` — update all paths to `/app/*`
+- **Edit**: `src/components/NavLink.tsx` — update paths
+- **Edit**: `src/pages/SettingsPage.tsx` — update internal links
+- **Edit**: `src/pages/Index.tsx` — update any navigate calls
+- **Edit**: `src/pages/ReceiptDetail.tsx` — update navigate paths
+- **Edit**: `src/pages/Stats.tsx` — update navigate paths
+- **Edit**: `src/pages/Machines.tsx` — update navigate paths
+- **Edit**: `src/pages/MachineDetail.tsx` — update navigate paths
+- **Edit**: `src/pages/Chat.tsx` — update if needed
+- **Edit**: `src/pages/Receipts.tsx` — update navigate paths
 
