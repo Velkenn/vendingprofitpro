@@ -167,6 +167,32 @@ export default function SKUDetailModal({ skuId, open, onClose }: Props) {
 
   const fmt = (n: number) => `$${n.toFixed(2)}`;
 
+  /** Extract store name + city from a full store_location string, dropping address/state/zip */
+  const shortStore = (loc: string | null, vendor: string): string => {
+    if (!loc) {
+      return vendor === "sams" ? "Sam's Club" : vendor === "walmart" ? "Walmart" : "Other";
+    }
+    // Common pattern: "Store Name — City, ST 12345" or "Store Name — 123 Main St, City, ST 12345"
+    const parts = loc.split(" — ");
+    const storeName = parts[0]?.trim() || loc;
+    if (parts.length < 2) return storeName;
+    const right = parts[1].trim();
+    // Try to extract city from comma-separated segments: pick the segment before state/zip
+    const segments = right.split(",").map(s => s.trim());
+    // If there are multiple segments, find the city (usually second-to-last before "ST ZIP")
+    if (segments.length >= 2) {
+      // Last segment is usually "ST 12345" — the one before it is the city
+      const city = segments[segments.length - 2];
+      // If the city looks like a street address (starts with a number), try the next one
+      if (/^\d/.test(city) && segments.length >= 3) {
+        return `${storeName} — ${segments[segments.length - 3]}`;
+      }
+      return `${storeName} — ${city}`;
+    }
+    // Single segment after dash — just use it (could already be just a city)
+    return `${storeName} — ${right.replace(/\s+\d{5}(-\d{4})?$/, "")}`;
+  };
+
   const rebuyColor = (s: string) => {
     if (s === "Rebuy") return "bg-primary/10 text-primary";
     if (s === "Core") return "bg-chart-2/10 text-chart-2";
@@ -251,7 +277,7 @@ export default function SKUDetailModal({ skuId, open, onClose }: Props) {
                                   <p className="text-xs font-medium">
                                     {format(new Date(p.date), "MMM d, yyyy")}
                                     <span className="ml-1.5 font-normal text-muted-foreground">
-                                      {p.store_location || (p.vendor === "sams" ? "Sam's Club" : p.vendor === "walmart" ? "Walmart" : "Other")}
+                                      {shortStore(p.store_location, p.vendor)}
                                     </span>
                                   </p>
                                   <p className="text-xs text-muted-foreground">
