@@ -305,12 +305,21 @@ export default function Chat() {
                     )}
                   </div>
                   {msg.role === "assistant" && !isLoading && (
-                    <button
-                      onClick={() => saveMemory(msg.content)}
-                      className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary mt-1 ml-1 transition-colors"
-                    >
-                      <Bookmark className="h-3 w-3" /> Save to Memory
-                    </button>
+                    <div className="flex items-center gap-3 mt-1 ml-1">
+                      <button
+                        onClick={() => copyToClipboard(i)}
+                        className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
+                      >
+                        {copiedIndex === i ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                        {copiedIndex === i ? "Copied!" : "Copy"}
+                      </button>
+                      <button
+                        onClick={() => saveMemory(msg.content)}
+                        className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
+                      >
+                        <Bookmark className="h-3 w-3" /> Save to Memory
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
