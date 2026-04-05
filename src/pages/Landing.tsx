@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "@/contexts/AuthContext";
 import { Receipt, BarChart3, Bot, Monitor, Camera, Smartphone, ArrowRight, CheckCircle, Zap, Shield } from "lucide-react";
 
 function useInView(threshold = 0.15) {
