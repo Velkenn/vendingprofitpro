@@ -39,11 +39,11 @@ const TIME_FILTERS: { value: TimeFilter; label: string }[] = [
   { value: "lifetime", label: "Lifetime" },
 ];
 
-function getFilterRange(filter: TimeFilter, offset: number): { start: Date; end: Date } | null {
+function getFilterRange(filter: TimeFilter, offset: number, weekStartsOn: 0|1|2|3|4|5|6 = 0): { start: Date; end: Date } | null {
   const now = new Date();
   if (filter === "week") {
-    const base = subWeeks(startOfWeek(now, { weekStartsOn: 0 }), -offset);
-    return { start: base, end: endOfWeek(base, { weekStartsOn: 0 }) };
+    const base = subWeeks(startOfWeek(now, { weekStartsOn }), -offset);
+    return { start: base, end: endOfWeek(base, { weekStartsOn }) };
   }
   if (filter === "month") {
     const base = subMonths(startOfMonth(now), -offset);
@@ -56,8 +56,8 @@ function getFilterRange(filter: TimeFilter, offset: number): { start: Date; end:
   return null;
 }
 
-function getPeriodLabel(filter: TimeFilter, offset: number): string {
-  const range = getFilterRange(filter, offset);
+function getPeriodLabel(filter: TimeFilter, offset: number, weekStartsOn: 0|1|2|3|4|5|6 = 0): string {
+  const range = getFilterRange(filter, offset, weekStartsOn);
   if (!range) return "";
   if (filter === "week") return `${format(range.start, "MMM d")}–${format(range.end, "MMM d, yyyy")}`;
   if (filter === "month") return format(range.start, "MMMM yyyy");
@@ -76,6 +76,7 @@ export default function MachineDetail() {
   const [loading, setLoading] = useState(true);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("lifetime");
   const [periodOffset, setPeriodOffset] = useState(0);
+  const [weekStartDay, setWeekStartDay] = useState<0|1|2|3|4|5|6>(0);
 
   // Log sales dialog
   const [logOpen, setLogOpen] = useState(false);
@@ -99,6 +100,13 @@ export default function MachineDetail() {
 
   useEffect(() => { setPeriodOffset(0); }, [timeFilter]);
 
+  useEffect(() => {
+    if (!user) return;
+    supabase.from("user_settings").select("week_start_day").eq("user_id", user.id).maybeSingle().then(({ data }) => {
+      if (data) setWeekStartDay(data.week_start_day as 0|1|2|3|4|5|6);
+    });
+  }, [user]);
+
   const fetchData = async () => {
     if (!user || !id) return;
     setLoading(true);
@@ -115,7 +123,7 @@ export default function MachineDetail() {
 
   useEffect(() => { fetchData(); }, [user, id]);
 
-  const range = getFilterRange(timeFilter, periodOffset);
+  const range = getFilterRange(timeFilter, periodOffset, weekStartDay);
   const filteredSales = sales.filter((s) => {
     if (!range) return true;
     const d = new Date(s.date);
@@ -308,7 +316,7 @@ export default function MachineDetail() {
                 <ChevronLeft className="h-4 w-4" />
               </Button>
               <span className="text-xs font-medium min-w-[140px] text-center">
-                {getPeriodLabel(timeFilter, periodOffset)}
+                {getPeriodLabel(timeFilter, periodOffset, weekStartDay)}
               </span>
               <Button variant="ghost" size="icon" className="h-7 w-7" disabled={periodOffset >= 0} onClick={() => setPeriodOffset(o => o + 1)}>
                 <ChevronRight className="h-4 w-4" />

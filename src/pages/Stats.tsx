@@ -75,8 +75,16 @@ export default function Stats() {
   const [storeMergeDialogOpen, setStoreMergeDialogOpen] = useState(false);
   const [survivorStore, setSurvivorStore] = useState<string | null>(null);
   const [storeMerging, setStoreMerging] = useState(false);
+  const [weekStartDay, setWeekStartDay] = useState<0 | 1 | 2 | 3 | 4 | 5 | 6>(0);
 
   useEffect(() => { setPeriodOffset(0); }, [timeFilter]);
+
+  useEffect(() => {
+    if (!user) return;
+    supabase.from("user_settings").select("week_start_day").eq("user_id", user.id).maybeSingle().then(({ data }) => {
+      if (data) setWeekStartDay(data.week_start_day as 0 | 1 | 2 | 3 | 4 | 5 | 6);
+    });
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -119,8 +127,8 @@ export default function Stats() {
     }
 
     if (filter === "week") {
-      const base = subWeeks(startOfWeek(now, { weekStartsOn: 0 }), -offset);
-      return { start: base, end: endOfWeek(base, { weekStartsOn: 0 }) };
+      const base = subWeeks(startOfWeek(now, { weekStartsOn: weekStartDay }), -offset);
+      return { start: base, end: endOfWeek(base, { weekStartsOn: weekStartDay }) };
     }
     if (filter === "month") {
       const base = subMonths(startOfMonth(now), -offset);
