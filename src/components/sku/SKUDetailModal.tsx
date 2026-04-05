@@ -97,6 +97,7 @@ export default function SKUDetailModal({ skuId, open, onClose }: Props) {
           id: item.id,
           date: item.receipts.receipt_date,
           vendor: item.receipts.vendor,
+          store_location: item.receipts.store_location,
           qty: item.qty,
           pack_size: item.pack_size,
           unit_cost: item.unit_cost,
