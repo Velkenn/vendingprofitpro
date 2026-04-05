@@ -15,6 +15,7 @@ interface PurchaseEntry {
   id: string;
   date: string;
   vendor: string;
+  store_location: string | null;
   qty: number;
   pack_size: number | null;
   unit_cost: number | null;
@@ -61,7 +62,7 @@ export default function SKUDetailModal({ skuId, open, onClose }: Props) {
       supabase.from("skus").select("*").eq("id", skuId).single(),
       supabase
         .from("receipt_items")
-        .select("id, qty, pack_size, unit_cost, line_total, receipts!inner(receipt_date, vendor)")
+        .select("id, qty, pack_size, unit_cost, line_total, receipts!inner(receipt_date, vendor, store_location)")
         .eq("sku_id", skuId)
         .order("created_at", { ascending: false }),
     ]).then(([skuRes, itemsRes]) => {
@@ -74,7 +75,7 @@ export default function SKUDetailModal({ skuId, open, onClose }: Props) {
         pack_size: number | null;
         unit_cost: number | null;
         line_total: number;
-        receipts: { receipt_date: string; vendor: string };
+        receipts: { receipt_date: string; vendor: string; store_location: string | null };
       }>;
 
       const sellPrice = skuData?.sell_price ? Number(skuData.sell_price) : null;
@@ -96,6 +97,7 @@ export default function SKUDetailModal({ skuId, open, onClose }: Props) {
           id: item.id,
           date: item.receipts.receipt_date,
           vendor: item.receipts.vendor,
+          store_location: item.receipts.store_location,
           qty: item.qty,
           pack_size: item.pack_size,
           unit_cost: item.unit_cost,
@@ -248,6 +250,9 @@ export default function SKUDetailModal({ skuId, open, onClose }: Props) {
                                 <div>
                                   <p className="text-xs font-medium">
                                     {format(new Date(p.date), "MMM d, yyyy")}
+                                    <span className="ml-1.5 font-normal text-muted-foreground">
+                                      {p.store_location || (p.vendor === "sams" ? "Sam's Club" : p.vendor === "walmart" ? "Walmart" : "Other")}
+                                    </span>
                                   </p>
                                   <p className="text-xs text-muted-foreground">
                                     {p.qty}× {p.pack_size ? `${p.pack_size}pk` : "1pk"} = {p.units} units
