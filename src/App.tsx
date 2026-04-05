@@ -52,6 +52,7 @@ function AppRoutes() {
         <Route path="/profit-leaderboard" element={<ProfitLeaderboard />} />
         <Route path="/machines" element={<Machines />} />
         <Route path="/machines/:id" element={<MachineDetail />} />
+        <Route path="/chat" element={<Chat />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/export" element={<Export />} />
       </Route>

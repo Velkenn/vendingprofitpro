@@ -5,7 +5,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { LogOut, FileDown, Zap } from "lucide-react";
+import { LogOut, FileDown, Zap, Package } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import AISettingsDialog from "@/components/settings/AISettingsDialog";
 
 const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];

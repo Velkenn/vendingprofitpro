@@ -4,10 +4,10 @@ import { cn } from "@/lib/utils";
 
 const navItems = [
   { path: "/", icon: LayoutDashboard, label: "Home" },
-  { path: "/receipts", icon: Receipt, label: "Receipts" },
+  { path: "/chat", icon: MessageCircle, label: "Chat" },
   { path: "/stats", icon: BarChart3, label: "Stats" },
-  { path: "/skus", icon: Package, label: "SKUs" },
   { path: "/machines", icon: Monitor, label: "Machines" },
+  { path: "/receipts", icon: Receipt, label: "Receipts" },
   { path: "/settings", icon: Settings, label: "More" },
 ];
 
