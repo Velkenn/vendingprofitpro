@@ -76,6 +76,7 @@ export default function MachineDetail() {
   const [loading, setLoading] = useState(true);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("lifetime");
   const [periodOffset, setPeriodOffset] = useState(0);
+  const [weekStartDay, setWeekStartDay] = useState<0|1|2|3|4|5|6>(0);
 
   // Log sales dialog
   const [logOpen, setLogOpen] = useState(false);

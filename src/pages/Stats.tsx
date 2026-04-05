@@ -127,8 +127,8 @@ export default function Stats() {
     }
 
     if (filter === "week") {
-      const base = subWeeks(startOfWeek(now, { weekStartsOn: 0 }), -offset);
-      return { start: base, end: endOfWeek(base, { weekStartsOn: 0 }) };
+      const base = subWeeks(startOfWeek(now, { weekStartsOn: weekStartDay }), -offset);
+      return { start: base, end: endOfWeek(base, { weekStartsOn: weekStartDay }) };
     }
     if (filter === "month") {
       const base = subMonths(startOfMonth(now), -offset);

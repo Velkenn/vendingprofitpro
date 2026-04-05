@@ -74,8 +74,16 @@ export default function Machines() {
   const [newName, setNewName] = useState("");
   const [newLocation, setNewLocation] = useState("");
   const [saving, setSaving] = useState(false);
+  const [weekStartDay, setWeekStartDay] = useState<0|1|2|3|4|5|6>(0);
 
   useEffect(() => { setPeriodOffset(0); }, [timeFilter]);
+
+  useEffect(() => {
+    if (!user) return;
+    supabase.from("user_settings").select("week_start_day").eq("user_id", user.id).maybeSingle().then(({ data }) => {
+      if (data) setWeekStartDay(data.week_start_day as 0|1|2|3|4|5|6);
+    });
+  }, [user]);
 
   const fetchData = async () => {
     if (!user) return;

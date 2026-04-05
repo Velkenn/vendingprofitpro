@@ -50,6 +50,7 @@ export default function SettingsPage() {
       .from("user_settings")
       .upsert({ user_id: user.id, week_start_day: parseInt(val) }, { onConflict: "user_id" });
     if (error) toast({ title: "Error", description: error.message, variant: "destructive" });
+    else toast({ title: "Saved" });
   };
 
   const exportTable = async (table: "receipts" | "receipt_items" | "skus") => {
