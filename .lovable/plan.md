@@ -1,39 +1,77 @@
 
 
-## Support Image Receipt Parsing (Same as PDFs)
+## Add Chat Tab with AI Assistant "Chip" — Full Data Access
 
-### Problem
-Currently, when a user uploads an image (JPG, PNG, etc.), the edge function tries to extract text using `pdfjs-serverless`, which fails with "Invalid PDF structure." Images need to be sent directly to the user's AI provider as vision input instead of going through PDF text extraction.
+### Overview
+Create the entire Chip chat feature from scratch: database table, edge function, chat page, and navigation changes. Chip will have access to ALL of the user's SKUs and receipts (not just summaries).
 
-### Solution
-Detect whether the uploaded file is an image or PDF. For images, skip PDF text extraction entirely and send the image directly to the AI provider's vision/multimodal API. All three supported providers (Anthropic, OpenAI, Google) support image inputs.
+### 1. Database Migration — `chip_memories` table
 
-### Implementation (single file: `supabase/functions/parse-receipt/index.ts`)
+```sql
+CREATE TABLE public.chip_memories (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  memory_text text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE public.chip_memories ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can view own memories" ON public.chip_memories FOR SELECT USING (auth.uid() = user_id);
+CREATE POLICY "Users can insert own memories" ON public.chip_memories FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Users can delete own memories" ON public.chip_memories FOR DELETE USING (auth.uid() = user_id);
+```
 
-**1. Add image detection helper**
-- Check file bytes for magic bytes (JPEG: `FF D8`, PNG: `89 50 4E 47`) or check the file extension from `file_path`
-- Add a helper: `isImageFile(bytes: Uint8Array, filePath: string): boolean`
+### 2. New Edge Function — `supabase/functions/chip-chat/index.ts`
 
-**2. Add `parseImageWithUserProvider` function**
-- Convert image bytes to base64
-- For each provider, send the image as a vision input alongside the same `SYSTEM_PROMPT` and `EXTRACT_TOOL`:
-  - **Anthropic**: Use `content: [{ type: "image", source: { type: "base64", media_type, data } }, { type: "text", text: prompt }]`
-  - **OpenAI**: Use `content: [{ type: "image_url", image_url: { url: "data:image/...;base64,..." } }, { type: "text", text: prompt }]`
-  - **Google**: Use `contents: [{ parts: [{ inlineData: { mimeType, data } }, { text: prompt }] }]`
-- Return the same `ParsedReceipt` structure as `parseWithUserProvider`
+- Accepts `{ messages }` with Authorization header
+- Authenticates user, fetches their AI provider settings (falls back to Lovable AI via `LOVABLE_API_KEY`)
+- Fetches ALL user data using service role client:
+  - **All SKUs**: id, sku_name, sell_price, category, rebuy_status, default_is_personal
+  - **All receipts**: id, vendor, receipt_date, store_location, total, tax, subtotal, item_count
+  - **All receipt_items**: raw_name, qty, pack_size, line_total, unit_cost, is_personal, sku_id, receipt_id
+  - **All machines + machine_sales**: name, location, date, cash_amount, credit_amount
+  - **All chip_memories**: memory_text
+- Serializes this into a structured system prompt context section
+- System prompt defines Chip as a friendly vending industry expert who:
+  - Can answer questions about any SKU, receipt, cost, profit, trend
+  - Proactively compares periods and offers insights
+  - References saved memories when relevant
+  - Knows typical vending margins, seasonal patterns, restocking advice
+- Streams response back via SSE for real-time token rendering
+- Handles all 3 providers (Anthropic, OpenAI, Google) + Lovable AI fallback
 
-**3. Update main handler flow (line ~795-810)**
-- After downloading the file, check if it's an image
-- If image:
-  - Require AI config (no regex fallback for images — can't extract text without AI)
-  - If no AI configured, fail with a clear message: "Image receipts require an AI provider. Please configure one in Settings → AI Settings."
-  - Call `parseImageWithUserProvider` instead of `extractPdfText` + `parseWithUserProvider`
-- If PDF: keep existing flow unchanged
-- Everything after parsing (SKU matching, normalization, insert) stays the same
+### 3. New Page — `src/pages/Chat.tsx`
 
-**4. Base64 chunking consideration**
-- Images can be large; encode to base64 in one shot (Deno handles this fine for typical receipt photos ~1-5MB)
+**Chip's Memory** (collapsible card at top):
+- Fetches from `chip_memories`, each with delete button
+- Collapsed by default
+
+**Suggested questions** (shown when no messages):
+- "What is my most profitable SKU?"
+- "How much did I spend last month?"
+- "Which machine is performing best?"
+- "What should I restock soon?"
+
+**Chat interface**:
+- User messages right-aligned in green, Chip messages left with robot avatar
+- Streaming SSE rendering with `react-markdown`
+- "Save to Memory" button under each Chip response
+- Input bar fixed above bottom nav
+
+### 4. Navigation Changes
+
+**`src/components/BottomNav.tsx`**: Reorder to Home, Chat, Stats, Machines, Receipts. Remove SKUs.
+
+**`src/pages/SettingsPage.tsx`**: Add link to SKUs page in the More section.
+
+**`src/App.tsx`**: Add `/chat` route.
+
+**Install**: `react-markdown` package.
 
 ### Files changed
-- **Edit**: `supabase/functions/parse-receipt/index.ts` — add image detection, vision-based parsing for all 3 providers, route images through vision API in main handler
+- **Migration**: Create `chip_memories` table with RLS
+- **New**: `supabase/functions/chip-chat/index.ts`
+- **New**: `src/pages/Chat.tsx`
+- **Edit**: `src/components/BottomNav.tsx`
+- **Edit**: `src/pages/SettingsPage.tsx`
+- **Edit**: `src/App.tsx`
 
