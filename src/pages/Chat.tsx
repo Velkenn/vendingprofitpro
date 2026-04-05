@@ -37,7 +37,22 @@ export default function Chat() {
   const [isLoading, setIsLoading] = useState(false);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const copyToClipboard = (msgIndex: number) => {
+    const msg = messages[msgIndex];
+    if (!msg || msg.role !== "assistant") return;
+    let question = "";
+    for (let i = msgIndex - 1; i >= 0; i--) {
+      if (messages[i].role === "user") { question = messages[i].content; break; }
+    }
+    const text = question ? `Q: ${question}\n\nA: ${msg.content}` : msg.content;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedIndex(msgIndex);
+      setTimeout(() => setCopiedIndex(null), 2000);
+    });
+  };
 
   useEffect(() => {
     if (!user) return;
