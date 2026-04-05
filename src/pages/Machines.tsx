@@ -177,7 +177,7 @@ export default function Machines() {
                 <ChevronLeft className="h-4 w-4" />
               </Button>
               <span className="text-xs font-medium min-w-[140px] text-center">
-                {getPeriodLabel(timeFilter, periodOffset)}
+                {getPeriodLabel(timeFilter, periodOffset, weekStartDay)}
               </span>
               <Button variant="ghost" size="icon" className="h-7 w-7" disabled={periodOffset >= 0} onClick={() => setPeriodOffset(o => o + 1)}>
                 <ChevronRight className="h-4 w-4" />
