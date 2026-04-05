@@ -15,6 +15,7 @@ interface PurchaseEntry {
   id: string;
   date: string;
   vendor: string;
+  store_location: string | null;
   qty: number;
   pack_size: number | null;
   unit_cost: number | null;
