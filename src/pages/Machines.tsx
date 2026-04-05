@@ -99,7 +99,7 @@ export default function Machines() {
 
   useEffect(() => { fetchData(); }, [user]);
 
-  const range = getFilterRange(timeFilter, periodOffset);
+  const range = getFilterRange(timeFilter, periodOffset, weekStartDay);
 
   const filteredSales = sales.filter((s) => {
     if (!range) return true;
