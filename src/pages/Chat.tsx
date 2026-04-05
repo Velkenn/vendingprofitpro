@@ -190,7 +190,7 @@ export default function Chat() {
   };
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-5rem)]">
+    <div className="flex flex-col h-[calc(100dvh-7.5rem)]">
       {/* Header */}
       <div className="px-4 pt-4 pb-2">
         <div className="flex items-center gap-2 mb-3">
