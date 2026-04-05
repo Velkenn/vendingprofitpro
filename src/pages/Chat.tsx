@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Bot, ChevronDown, ChevronUp, Send, Bookmark, Trash2, Sparkles } from "lucide-react";
+import { Bot, ChevronDown, ChevronUp, Send, Bookmark, Trash2, Sparkles, Copy, Check } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
 interface Message {
@@ -37,7 +37,22 @@ export default function Chat() {
   const [isLoading, setIsLoading] = useState(false);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [memoryOpen, setMemoryOpen] = useState(false);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  const copyToClipboard = (msgIndex: number) => {
+    const msg = messages[msgIndex];
+    if (!msg || msg.role !== "assistant") return;
+    let question = "";
+    for (let i = msgIndex - 1; i >= 0; i--) {
+      if (messages[i].role === "user") { question = messages[i].content; break; }
+    }
+    const text = question ? `Q: ${question}\n\nA: ${msg.content}` : msg.content;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedIndex(msgIndex);
+      setTimeout(() => setCopiedIndex(null), 2000);
+    });
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -290,12 +305,21 @@ export default function Chat() {
                     )}
                   </div>
                   {msg.role === "assistant" && !isLoading && (
-                    <button
-                      onClick={() => saveMemory(msg.content)}
-                      className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary mt-1 ml-1 transition-colors"
-                    >
-                      <Bookmark className="h-3 w-3" /> Save to Memory
-                    </button>
+                    <div className="flex items-center gap-3 mt-1 ml-1">
+                      <button
+                        onClick={() => copyToClipboard(i)}
+                        className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
+                      >
+                        {copiedIndex === i ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                        {copiedIndex === i ? "Copied!" : "Copy"}
+                      </button>
+                      <button
+                        onClick={() => saveMemory(msg.content)}
+                        className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
+                      >
+                        <Bookmark className="h-3 w-3" /> Save to Memory
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>
