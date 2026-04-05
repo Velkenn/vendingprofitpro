@@ -22,6 +22,7 @@ import SettingsPage from "@/pages/SettingsPage";
 import Export from "@/pages/Export";
 import Machines from "@/pages/Machines";
 import MachineDetail from "@/pages/MachineDetail";
+import Chat from "@/pages/Chat";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
