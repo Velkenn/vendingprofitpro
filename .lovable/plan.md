@@ -1,19 +1,18 @@
 
 
-## Auto-redirect Logged-in Users Past Landing Page
+## Add Copy to Clipboard for Chip's Responses
 
-### Problem
-Returning users who visit the root URL (`/`) see the marketing landing page every time, even though they're already authenticated.
+### Change
 
-### Fix
+**Edit: `src/pages/Chat.tsx`**
 
-**Edit: `src/pages/Landing.tsx`**
-- Import `useAuth` from `AuthContext` and `useNavigate` from React Router
-- Add a `useEffect` that checks if the user has an active session — if so, navigate to `/app` with `replace: true`
-- Show a brief loading state while the auth check runs to avoid a flash of the landing page
+- Import `Copy` and `Check` icons from lucide-react
+- Add a `copyToClipboard` function that finds the preceding user message for a given assistant message index, formats the text as `Q: {question}\n\nA: {answer}`, and copies it using `navigator.clipboard.writeText()`
+- Add a small state tracker (`copiedIndex`) to show a brief checkmark confirmation after copying
+- Place a "Copy" button next to the existing "Save to Memory" button below each assistant response (lines 292-298), styled identically
 
-This is the same pattern already used in `Auth.tsx` for redirecting logged-in users.
+The copied text will include the user's question prefixed with "Q:" and Chip's answer prefixed with "A:" so recipients get full context.
 
 ### Files changed
-- **Edit**: `src/pages/Landing.tsx` — add session check + redirect to `/app`
+- **Edit**: `src/pages/Chat.tsx` — add copy button with question context next to Save to Memory
 
