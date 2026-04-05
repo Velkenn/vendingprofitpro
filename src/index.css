@@ -125,7 +125,7 @@
 
 @layer utilities {
   .safe-bottom {
-    padding-bottom: max(env(safe-area-inset-bottom), 1rem);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
   }
   .scroll-touch {
     -webkit-overflow-scrolling: touch;
