@@ -80,7 +80,7 @@ export default function SettingsPage() {
               <p className="font-medium text-sm">SKU Management</p>
               <p className="text-xs text-muted-foreground">View and manage your product catalog</p>
             </div>
-            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => navigate("/skus")}>
+            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => navigate("/app/skus")}>
               <Package className="h-4 w-4" /> View SKUs
             </Button>
           </div>

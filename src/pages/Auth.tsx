@@ -20,7 +20,7 @@ export default function Auth() {
   const { session } = useAuth();
 
   useEffect(() => {
-    if (session) navigate("/", { replace: true });
+    if (session) navigate("/app", { replace: true });
   }, [session, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {

@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { SKUDetailProvider } from "@/contexts/SKUDetailContext";
 import AppShell from "@/components/AppShell";
+import Landing from "@/pages/Landing";
 import Auth from "@/pages/Auth";
 import ResetPassword from "@/pages/ResetPassword";
 import Index from "@/pages/Index";
@@ -37,24 +38,25 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 function AppRoutes() {
   return (
     <Routes>
+      <Route path="/" element={<Landing />} />
       <Route path="/auth" element={<Auth />} />
       <Route path="/reset-password" element={<ResetPassword />} />
       <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
-        <Route path="/" element={<Index />} />
-        <Route path="/receipts" element={<Receipts />} />
-        <Route path="/receipts/:id" element={<ReceiptDetail />} />
-        <Route path="/stats" element={<Stats />} />
-        <Route path="/skus" element={<SKUs />} />
-        <Route path="/needs-review" element={<NeedsReview />} />
-        <Route path="/needs-price" element={<NeedsPrice />} />
-        <Route path="/purchases" element={<Purchases />} />
-        <Route path="/cost-trends" element={<CostTrends />} />
-        <Route path="/profit-leaderboard" element={<ProfitLeaderboard />} />
-        <Route path="/machines" element={<Machines />} />
-        <Route path="/machines/:id" element={<MachineDetail />} />
-        <Route path="/chat" element={<Chat />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/export" element={<Export />} />
+        <Route path="/app" element={<Index />} />
+        <Route path="/app/receipts" element={<Receipts />} />
+        <Route path="/app/receipts/:id" element={<ReceiptDetail />} />
+        <Route path="/app/stats" element={<Stats />} />
+        <Route path="/app/skus" element={<SKUs />} />
+        <Route path="/app/needs-review" element={<NeedsReview />} />
+        <Route path="/app/needs-price" element={<NeedsPrice />} />
+        <Route path="/app/purchases" element={<Purchases />} />
+        <Route path="/app/cost-trends" element={<CostTrends />} />
+        <Route path="/app/profit-leaderboard" element={<ProfitLeaderboard />} />
+        <Route path="/app/machines" element={<Machines />} />
+        <Route path="/app/machines/:id" element={<MachineDetail />} />
+        <Route path="/app/chat" element={<Chat />} />
+        <Route path="/app/settings" element={<SettingsPage />} />
+        <Route path="/app/export" element={<Export />} />
       </Route>
       <Route path="*" element={<NotFound />} />
     </Routes>

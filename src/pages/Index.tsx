@@ -354,7 +354,7 @@ export default function Index() {
                 </div>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={handleUploadReset}>New</Button>
-                  <Button size="sm" onClick={() => navigate(`/receipts/${uploadReceipt.id}`)}>View</Button>
+                  <Button size="sm" onClick={() => navigate(`/app/receipts/${uploadReceipt.id}`)}>View</Button>
                 </div>
               </div>
             )}
@@ -451,7 +451,7 @@ export default function Index() {
             {needsReviewCount > 0 && (
               <div
                 className="flex items-center gap-2 cursor-pointer rounded-lg p-2 hover:bg-muted/50 transition-colors"
-                onClick={() => navigate("/needs-review")}
+                onClick={() => navigate("/app/needs-review")}
               >
                 <AlertTriangle className="h-4 w-4 text-accent" />
                 <p className="text-sm flex-1">{needsReviewCount} items need review</p>
@@ -461,7 +461,7 @@ export default function Index() {
             {needsPriceCount > 0 && (
               <div
                 className="flex items-center gap-2 cursor-pointer rounded-lg p-2 hover:bg-muted/50 transition-colors"
-                onClick={() => navigate("/needs-price")}
+                onClick={() => navigate("/app/needs-price")}
               >
                 <Tag className="h-4 w-4 text-accent" />
                 <p className="text-sm flex-1">{needsPriceCount} SKUs need a price</p>

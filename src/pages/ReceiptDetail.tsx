@@ -52,7 +52,7 @@ export default function ReceiptDetail() {
       const { error } = await supabase.from("receipts").delete().eq("id", id);
       if (error) throw error;
       toast({ title: "Receipt deleted" });
-      navigate("/receipts");
+      navigate("/app/receipts");
     } catch (err: any) {
       toast({ title: "Error", description: err.message, variant: "destructive" });
     } finally {

@@ -28,7 +28,7 @@ export default function ResetPassword() {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     } else {
       toast({ title: "Password updated!" });
-      navigate("/", { replace: true });
+      navigate("/app", { replace: true });
     }
     setLoading(false);
   };

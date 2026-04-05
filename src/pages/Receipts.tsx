@@ -293,7 +293,7 @@ export default function Receipts() {
                   <Button variant="outline" size="sm" onClick={handleUploadReset}>
                     Upload Another
                   </Button>
-                  <Button size="sm" onClick={() => navigate(`/receipts/${uploadReceipt.id}`)}>
+                  <Button size="sm" onClick={() => navigate(`/app/receipts/${uploadReceipt.id}`)}>
                     View Receipt
                   </Button>
                 </div>
@@ -312,7 +312,7 @@ export default function Receipts() {
                     Try Again
                   </Button>
                   {uploadReceipt && (
-                    <Button size="sm" onClick={() => navigate(`/receipts/${uploadReceipt.id}`)}>
+                    <Button size="sm" onClick={() => navigate(`/app/receipts/${uploadReceipt.id}`)}>
                       View Anyway
                     </Button>
                   )}
@@ -373,7 +373,7 @@ export default function Receipts() {
                           const status = getReceiptStatus(r.parse_status);
                           const StatusIcon = status.icon;
                           return (
-                            <Card key={r.id} className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate(`/receipts/${r.id}`)}>
+                            <Card key={r.id} className="border-0 shadow-sm cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate(`/app/receipts/${r.id}`)}>
                               <CardContent className="flex items-center gap-3 p-4">
                                 <div className="flex-1">
                                   <p className="font-medium capitalize">{cleanStoreDisplay(r.vendor === "sams" ? "Sam's Club" : r.vendor === "walmart" ? "Walmart" : (r.store_location || "Unknown Store"))}</p>
