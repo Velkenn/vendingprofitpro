@@ -58,7 +58,7 @@ const PROVIDERS: ProviderConfig[] = [
   {
     id: "google",
     name: "Gemini",
-    models: ["gemini-2.5-pro", "gemini-2.5-flash"],
+    models: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
     color: "text-blue-700",
     bgColor: "bg-blue-50",
     borderColor: "border-blue-200",

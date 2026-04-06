@@ -12,7 +12,17 @@ interface AIConfig {
   model: string;
 }
 
-async function fetchAllRows(supabase: any, table: string, query: any) {
+interface Intent {
+  needs_skus: boolean;
+  needs_receipts: boolean;
+  needs_items: boolean;
+  needs_machines: boolean;
+  needs_sales: boolean;
+  date_filter: string | null;
+  broad: boolean;
+}
+
+async function fetchAllRows(_table: string, query: any) {
   const allRows: any[] = [];
   let offset = 0;
   const pageSize = 1000;
@@ -47,105 +57,234 @@ async function getAIConfig(supabase: any, userId: string): Promise<AIConfig> {
 
   const lovableKey = Deno.env.get("LOVABLE_API_KEY");
   if (lovableKey) {
-    return { provider: "lovable", apiKey: lovableKey, model: "google/gemini-3-flash-preview" };
+    return { provider: "lovable", apiKey: lovableKey, model: "google/gemini-2.5-flash-lite" };
   }
 
   throw new Error("No AI provider configured. Please set one up in Settings → AI Settings.");
 }
 
-async function fetchUserContext(supabase: any, userId: string) {
-  const [skus, receipts, items, machines, sales, memories] = await Promise.all([
-    fetchAllRows(supabase, "skus", supabase.from("skus").select("id, sku_name, sell_price, category, rebuy_status, default_is_personal").eq("user_id", userId)),
-    fetchAllRows(supabase, "receipts", supabase.from("receipts").select("id, vendor, receipt_date, store_location, total, tax, subtotal, item_count").eq("user_id", userId).order("receipt_date", { ascending: false })),
-    fetchAllRows(supabase, "receipt_items", supabase.from("receipt_items").select("receipt_id, raw_name, qty, pack_size, line_total, unit_cost, is_personal, sku_id").eq("user_id", userId)),
-    fetchAllRows(supabase, "machines", supabase.from("machines").select("id, name, location").eq("user_id", userId)),
-    fetchAllRows(supabase, "machine_sales", supabase.from("machine_sales").select("machine_id, date, cash_amount, credit_amount").eq("user_id", userId).order("date", { ascending: false })),
-    fetchAllRows(supabase, "chip_memories", supabase.from("chip_memories").select("memory_text, created_at").eq("user_id", userId).order("created_at", { ascending: false })),
-  ]);
+// Classify the user's question to determine which data tables are needed
+async function classifyIntent(question: string): Promise<Intent> {
+  const defaultIntent: Intent = {
+    needs_skus: true, needs_receipts: true, needs_items: true,
+    needs_machines: true, needs_sales: true, date_filter: null, broad: true,
+  };
 
-  return { skus, receipts, items, machines, sales, memories };
+  const lovableKey = Deno.env.get("LOVABLE_API_KEY");
+  if (!lovableKey) return defaultIntent;
+
+  try {
+    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${lovableKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash-lite",
+        messages: [
+          {
+            role: "system",
+            content: `You are a query classifier for a vending business app. Analyze the user's question and call the classify_intent function to indicate which data tables are needed.
+Tables:
+- skus: product catalog (names, prices, categories, rebuy status)
+- receipts: purchase records (dates, vendors, totals, store locations)  
+- items: line items on receipts (individual products bought, quantities, costs)
+- machines: vending machines (names, locations)
+- sales: machine revenue by date (cash, credit amounts)
+
+Set date_filter to "YYYY-MM" if the question mentions a specific month/period. Set broad=true only for comprehensive overviews or when unsure.`,
+          },
+          { role: "user", content: question },
+        ],
+        tools: [{
+          type: "function",
+          function: {
+            name: "classify_intent",
+            description: "Classify which data tables are needed to answer the question",
+            parameters: {
+              type: "object",
+              properties: {
+                needs_skus: { type: "boolean" },
+                needs_receipts: { type: "boolean" },
+                needs_items: { type: "boolean" },
+                needs_machines: { type: "boolean" },
+                needs_sales: { type: "boolean" },
+                date_filter: { type: "string", description: "YYYY-MM format or null" },
+                broad: { type: "boolean" },
+              },
+              required: ["needs_skus", "needs_receipts", "needs_items", "needs_machines", "needs_sales", "broad"],
+            },
+          },
+        }],
+        tool_choice: { type: "function", function: { name: "classify_intent" } },
+      }),
+    });
+
+    if (!res.ok) return defaultIntent;
+
+    const data = await res.json();
+    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+    if (!toolCall) return defaultIntent;
+
+    const parsed = JSON.parse(toolCall.function.arguments);
+    return {
+      needs_skus: parsed.needs_skus ?? true,
+      needs_receipts: parsed.needs_receipts ?? true,
+      needs_items: parsed.needs_items ?? true,
+      needs_machines: parsed.needs_machines ?? true,
+      needs_sales: parsed.needs_sales ?? true,
+      date_filter: parsed.date_filter || null,
+      broad: parsed.broad ?? true,
+    };
+  } catch (e) {
+    console.error("Intent classification failed, falling back to all data:", e);
+    return defaultIntent;
+  }
+}
+
+async function fetchSelectiveContext(supabase: any, userId: string, intent: Intent) {
+  const fetches: Promise<any>[] = [];
+  const keys: string[] = [];
+
+  // Always fetch memories
+  fetches.push(fetchAllRows("chip_memories", supabase.from("chip_memories").select("memory_text, created_at").eq("user_id", userId).order("created_at", { ascending: false })));
+  keys.push("memories");
+
+  if (intent.needs_skus || intent.broad) {
+    fetches.push(fetchAllRows("skus", supabase.from("skus").select("id, sku_name, sell_price, category, rebuy_status, default_is_personal").eq("user_id", userId)));
+    keys.push("skus");
+  }
+
+  if (intent.needs_receipts || intent.broad) {
+    let q = supabase.from("receipts").select("id, vendor, receipt_date, store_location, total, tax, subtotal, item_count").eq("user_id", userId).order("receipt_date", { ascending: false });
+    if (intent.date_filter && !intent.broad) {
+      const [year, month] = intent.date_filter.split("-").map(Number);
+      const start = `${year}-${String(month).padStart(2, "0")}-01`;
+      const endMonth = month === 12 ? 1 : month + 1;
+      const endYear = month === 12 ? year + 1 : year;
+      const end = `${endYear}-${String(endMonth).padStart(2, "0")}-01`;
+      q = q.gte("receipt_date", start).lt("receipt_date", end);
+    }
+    fetches.push(fetchAllRows("receipts", q));
+    keys.push("receipts");
+  }
+
+  if (intent.needs_items || intent.broad) {
+    fetches.push(fetchAllRows("receipt_items", supabase.from("receipt_items").select("receipt_id, raw_name, qty, pack_size, line_total, unit_cost, is_personal, sku_id").eq("user_id", userId)));
+    keys.push("items");
+  }
+
+  if (intent.needs_machines || intent.broad) {
+    fetches.push(fetchAllRows("machines", supabase.from("machines").select("id, name, location").eq("user_id", userId)));
+    keys.push("machines");
+  }
+
+  if (intent.needs_sales || intent.broad) {
+    let q = supabase.from("machine_sales").select("machine_id, date, cash_amount, credit_amount").eq("user_id", userId).order("date", { ascending: false });
+    if (intent.date_filter && !intent.broad) {
+      const [year, month] = intent.date_filter.split("-").map(Number);
+      const start = `${year}-${String(month).padStart(2, "0")}-01`;
+      const endMonth = month === 12 ? 1 : month + 1;
+      const endYear = month === 12 ? year + 1 : year;
+      const end = `${endYear}-${String(endMonth).padStart(2, "0")}-01`;
+      q = q.gte("date", start).lt("date", end);
+    }
+    fetches.push(fetchAllRows("machine_sales", q));
+    keys.push("sales");
+  }
+
+  const results = await Promise.all(fetches);
+  const ctx: any = { skus: [], receipts: [], items: [], machines: [], sales: [], memories: [] };
+  for (let i = 0; i < keys.length; i++) {
+    ctx[keys[i]] = results[i];
+  }
+
+  // Filter out Failed and Do Not Rebuy SKUs
+  if (ctx.skus.length > 0) {
+    ctx.skus = ctx.skus.filter((s: any) => s.rebuy_status !== "Failed" && s.rebuy_status !== "Do Not Rebuy");
+  }
+
+  return ctx;
 }
 
 function buildSystemPrompt(ctx: any): string {
-  const skuSummary = ctx.skus.map((s: any) =>
-    `- ${s.sku_name} | sell: $${s.sell_price ?? "?"} | status: ${s.rebuy_status} | cat: ${s.category ?? "?"} | personal: ${s.default_is_personal}`
-  ).join("\n");
+  const sections: string[] = [];
 
-  const receiptSummary = ctx.receipts.map((r: any) =>
-    `- ${r.receipt_date} | ${r.vendor} | ${r.store_location ?? "?"} | total: $${r.total ?? "?"} | items: ${r.item_count ?? "?"}`
-  ).join("\n");
+  sections.push(`You are Chip, a friendly and knowledgeable AI assistant for VendingTrackr — a vending machine business management app. You have deep expertise in the vending industry including typical profit margins (30-50%), restocking patterns, seasonal trends, and what good vs bad performance looks like.`);
 
-  // Build a receipt date lookup
-  const receiptDateMap: Record<string, string> = {};
-  for (const r of ctx.receipts) {
-    receiptDateMap[r.id] = r.receipt_date;
+  if (ctx.skus.length > 0) {
+    const skuSummary = ctx.skus.map((s: any) =>
+      `- ${s.sku_name} | sell: $${s.sell_price ?? "?"} | status: ${s.rebuy_status} | cat: ${s.category ?? "?"} | personal: ${s.default_is_personal}`
+    ).join("\n");
+    sections.push(`## SKUs (${ctx.skus.length} active products)\n${skuSummary}\n\nNote: SKUs marked as Failed or Do Not Rebuy have been excluded. Do not recommend or analyze them — the user has already moved on from those products.`);
   }
 
-  // Build SKU cost data from receipt items
-  const skuCosts: Record<string, { totalCost: number; totalUnits: number; name: string }> = {};
-  for (const item of ctx.items) {
-    if (item.is_personal || !item.sku_id) continue;
-    if (!skuCosts[item.sku_id]) {
-      const sku = ctx.skus.find((s: any) => s.id === item.sku_id);
-      skuCosts[item.sku_id] = { totalCost: 0, totalUnits: 0, name: sku?.sku_name ?? item.raw_name };
+  if (ctx.items.length > 0 && ctx.skus.length > 0) {
+    // Build receipt date lookup
+    const receiptDateMap: Record<string, string> = {};
+    for (const r of ctx.receipts) {
+      receiptDateMap[r.id] = r.receipt_date;
     }
-    skuCosts[item.sku_id].totalCost += Number(item.line_total) || 0;
-    skuCosts[item.sku_id].totalUnits += (item.qty || 1) * (item.pack_size || 1);
+
+    // SKU cost/profit analysis (only for active SKUs)
+    const activeSkuIds = new Set(ctx.skus.map((s: any) => s.id));
+    const skuCosts: Record<string, { totalCost: number; totalUnits: number; name: string }> = {};
+    for (const item of ctx.items) {
+      if (item.is_personal || !item.sku_id || !activeSkuIds.has(item.sku_id)) continue;
+      if (!skuCosts[item.sku_id]) {
+        const sku = ctx.skus.find((s: any) => s.id === item.sku_id);
+        skuCosts[item.sku_id] = { totalCost: 0, totalUnits: 0, name: sku?.sku_name ?? item.raw_name };
+      }
+      skuCosts[item.sku_id].totalCost += Number(item.line_total) || 0;
+      skuCosts[item.sku_id].totalUnits += (item.qty || 1) * (item.pack_size || 1);
+    }
+
+    const skuProfitLines = Object.entries(skuCosts).map(([skuId, data]) => {
+      const sku = ctx.skus.find((s: any) => s.id === skuId);
+      const sellPrice = sku?.sell_price ? Number(sku.sell_price) : null;
+      const avgCostPerUnit = data.totalUnits > 0 ? data.totalCost / data.totalUnits : null;
+      const profitPerUnit = sellPrice && avgCostPerUnit ? (sellPrice - avgCostPerUnit).toFixed(2) : "?";
+      return `- ${data.name}: ${data.totalUnits} units bought, avg cost/unit $${avgCostPerUnit?.toFixed(2) ?? "?"}, sell $${sellPrice ?? "?"}, profit/unit $${profitPerUnit}`;
+    }).join("\n");
+
+    if (skuProfitLines) {
+      sections.push(`## SKU Profit Analysis\n${skuProfitLines}`);
+    }
+
+    // Purchase detail
+    const purchaseDetail = ctx.items.map((item: any) => {
+      const date = receiptDateMap[item.receipt_id] ?? "?";
+      const units = (item.qty || 1) * (item.pack_size || 1);
+      return `- ${date} | ${item.raw_name} | qty: ${item.qty}, pack: ${item.pack_size ?? 1}, units: ${units}, cost: $${item.line_total}, personal: ${item.is_personal}`;
+    }).join("\n");
+    sections.push(`## Purchase Detail (${ctx.items.length} line items)\n${purchaseDetail}`);
   }
 
-  const skuProfitLines = Object.entries(skuCosts).map(([skuId, data]) => {
-    const sku = ctx.skus.find((s: any) => s.id === skuId);
-    const sellPrice = sku?.sell_price ? Number(sku.sell_price) : null;
-    const avgCostPerUnit = data.totalUnits > 0 ? data.totalCost / data.totalUnits : null;
-    const profitPerUnit = sellPrice && avgCostPerUnit ? (sellPrice - avgCostPerUnit).toFixed(2) : "?";
-    return `- ${data.name}: ${data.totalUnits} units bought, avg cost/unit $${avgCostPerUnit?.toFixed(2) ?? "?"}, sell $${sellPrice ?? "?"}, profit/unit $${profitPerUnit}`;
-  }).join("\n");
+  if (ctx.receipts.length > 0) {
+    const receiptSummary = ctx.receipts.map((r: any) =>
+      `- ${r.receipt_date} | ${r.vendor} | ${r.store_location ?? "?"} | total: $${r.total ?? "?"} | items: ${r.item_count ?? "?"}`
+    ).join("\n");
+    sections.push(`## Receipts (${ctx.receipts.length} total)\n${receiptSummary}`);
+  }
 
-  // Purchase detail: individual items with dates
-  const purchaseDetail = ctx.items.map((item: any) => {
-    const date = receiptDateMap[item.receipt_id] ?? "?";
-    const units = (item.qty || 1) * (item.pack_size || 1);
-    return `- ${date} | ${item.raw_name} | qty: ${item.qty}, pack: ${item.pack_size ?? 1}, units: ${units}, cost: $${item.line_total}, personal: ${item.is_personal}`;
-  }).join("\n");
-
-  const machineSummary = ctx.machines.map((m: any) => {
-    const mSales = ctx.sales.filter((s: any) => s.machine_id === m.id);
-    const totalRev = mSales.reduce((sum: number, s: any) => sum + Number(s.cash_amount) + Number(s.credit_amount), 0);
-    const salesLines = mSales.map((s: any) => {
-      const cash = Number(s.cash_amount);
-      const credit = Number(s.credit_amount);
-      return `  - ${s.date}: cash $${cash.toFixed(2)}, credit $${credit.toFixed(2)}, total $${(cash + credit).toFixed(2)}`;
+  if (ctx.machines.length > 0) {
+    const machineSummary = ctx.machines.map((m: any) => {
+      const mSales = ctx.sales.filter((s: any) => s.machine_id === m.id);
+      const totalRev = mSales.reduce((sum: number, s: any) => sum + Number(s.cash_amount) + Number(s.credit_amount), 0);
+      const salesLines = mSales.map((s: any) => {
+        const cash = Number(s.cash_amount);
+        const credit = Number(s.credit_amount);
+        return `  - ${s.date}: cash $${cash.toFixed(2)}, credit $${credit.toFixed(2)}, total $${(cash + credit).toFixed(2)}`;
+      }).join("\n");
+      return `- ${m.name} (${m.location ?? "?"}):\n${salesLines || "  No sales logged."}\n  Summary: ${mSales.length} entries, total revenue $${totalRev.toFixed(2)}`;
     }).join("\n");
-    return `- ${m.name} (${m.location ?? "?"}):\n${salesLines || "  No sales logged."}\n  Summary: ${mSales.length} entries, total revenue $${totalRev.toFixed(2)}`;
-  }).join("\n");
+    sections.push(`## Machines & Revenue\n${machineSummary}`);
+  }
 
   const memorySummary = ctx.memories.length > 0
     ? ctx.memories.map((m: any) => `- ${m.memory_text}`).join("\n")
     : "No saved memories yet.";
+  sections.push(`## Chip's Saved Memories\n${memorySummary}`);
 
-  return `You are Chip, a friendly and knowledgeable AI assistant for VendingTrackr — a vending machine business management app. You have deep expertise in the vending industry including typical profit margins (30-50%), restocking patterns, seasonal trends, and what good vs bad performance looks like.
-
-You have access to ALL of this user's business data:
-
-## SKUs (${ctx.skus.length} total)
-${skuSummary || "No SKUs yet."}
-
-## SKU Profit Analysis
-${skuProfitLines || "No purchase data yet."}
-
-## Receipts (${ctx.receipts.length} total)
-${receiptSummary || "No receipts yet."}
-
-## Purchase Detail (${ctx.items.length} total line items with dates)
-${purchaseDetail || "No purchase items yet."}
-
-## Machines & Revenue
-${machineSummary || "No machines yet."}
-
-## Chip's Saved Memories (user-saved insights from past conversations)
-${memorySummary}
-
-## Response Format (STRICT — follow exactly)
+  sections.push(`## Response Format (STRICT — follow exactly)
 1. Lead with ONE bold sentence: the single most important insight or answer.
 2. Follow with up to 3 short bullet points. Each MUST contain a specific number or dollar figure.
 3. NO section headers. NO nested lists. NO tables unless explicitly asked.
@@ -155,7 +294,9 @@ ${memorySummary}
 7. Proactively compare time periods when relevant (e.g. "up 12% from last month").
 8. Reference saved memories when relevant.
 9. If you lack data, say so in one sentence.
-10. Today's date is ${new Date().toISOString().split("T")[0]}.`;
+10. Today's date is ${new Date().toISOString().split("T")[0]}.`);
+
+  return sections.join("\n\n");
 }
 
 async function streamWithLovable(apiKey: string, model: string, messages: any[]) {
@@ -240,8 +381,18 @@ serve(async (req) => {
     }
 
     const { messages } = await req.json();
-    const aiConfig = await getAIConfig(supabase, user.id);
-    const ctx = await fetchUserContext(supabase, user.id);
+    
+    // Step 1: Get AI config and classify intent in parallel
+    const lastUserMsg = [...messages].reverse().find((m: any) => m.role === "user")?.content || "";
+    const [aiConfig, intent] = await Promise.all([
+      getAIConfig(supabase, user.id),
+      classifyIntent(lastUserMsg),
+    ]);
+
+    console.log("Intent classification:", JSON.stringify(intent));
+
+    // Step 2: Fetch only the data Chip needs
+    const ctx = await fetchSelectiveContext(supabase, user.id, intent);
     const systemPrompt = buildSystemPrompt(ctx);
 
     const fullMessages = [{ role: "system", content: systemPrompt }, ...messages];
