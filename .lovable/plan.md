@@ -1,18 +1,22 @@
 
 
-## Add Copy to Clipboard for Chip's Responses
+## Sort SKU Purchase History Chronologically
 
-### Change
+### Problem
+The purchase history in the SKU detail modal is ordered by `created_at` (when the record was imported), not by the actual receipt date. This means entries appear in import order rather than chronological order.
 
-**Edit: `src/pages/Chat.tsx`**
+### Fix
 
-- Import `Copy` and `Check` icons from lucide-react
-- Add a `copyToClipboard` function that finds the preceding user message for a given assistant message index, formats the text as `Q: {question}\n\nA: {answer}`, and copies it using `navigator.clipboard.writeText()`
-- Add a small state tracker (`copiedIndex`) to show a brief checkmark confirmation after copying
-- Place a "Copy" button next to the existing "Save to Memory" button below each assistant response (lines 292-298), styled identically
+**Edit: `src/components/sku/SKUDetailModal.tsx`**
 
-The copied text will include the user's question prefixed with "Q:" and Chip's answer prefixed with "A:" so recipients get full context.
+After building the `entries` array (around line 100), sort it by date descending (most recent first) before setting state:
+
+```ts
+entries.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+```
+
+This ensures both the Purchase History and Profit Breakdown sections display in proper chronological order since they both iterate over the same `purchases` array.
 
 ### Files changed
-- **Edit**: `src/pages/Chat.tsx` — add copy button with question context next to Save to Memory
+- **Edit**: `src/components/sku/SKUDetailModal.tsx` — add client-side sort by receipt date descending
 
