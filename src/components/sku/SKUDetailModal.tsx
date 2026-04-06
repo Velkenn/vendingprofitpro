@@ -108,6 +108,7 @@ export default function SKUDetailModal({ skuId, open, onClose }: Props) {
         };
       });
 
+      entries.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setPurchases(entries);
       setSummary({
         total_units: totalUnits,
