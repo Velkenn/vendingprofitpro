@@ -565,6 +565,12 @@ serve(async (req) => {
       regexIntent ? Promise.resolve(regexIntent) : classifyIntent(lastUserMsg),
     ]);
 
+    // Log intent classification if AI was used
+    if (!regexIntent) {
+      const intentInputChars = lastUserMsg.length + 500; // system prompt for classifier is ~500 chars
+      await logUsage(supabase, user.id, "chip_intent", "google/gemini-2.5-flash-lite", intentInputChars, 100);
+    }
+
     console.log("Intent classification:", JSON.stringify(intent), regexIntent ? "(regex)" : "(AI)");
 
     // Step 2: Fetch only the data Chip needs
