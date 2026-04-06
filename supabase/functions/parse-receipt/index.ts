@@ -1047,6 +1047,8 @@ serve(async (req) => {
         try {
           parsed = await parseWithUserProvider(rawText, aiConfig.provider, aiConfig.apiKey, aiConfig.model);
           console.log(`AI succeeded: ${parsed.items?.length || 0} items`);
+          const outputEstimate = JSON.stringify(parsed).length;
+          await logUsage(supabase, receiptForAI.user_id, "receipt_parse", aiConfig.model, rawText.length + SYSTEM_PROMPT.length, outputEstimate);
         } catch (aiErr: any) {
           console.error("AI error:", aiErr.message);
           await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
