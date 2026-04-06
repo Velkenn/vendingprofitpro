@@ -6,6 +6,34 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// --- Pricing table (per 1M tokens) ---
+const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  "google/gemini-2.5-flash-lite": { input: 0.075, output: 0.30 },
+  "google/gemini-2.5-flash": { input: 0.15, output: 0.60 },
+  "google/gemini-3-flash-preview": { input: 0.15, output: 0.60 },
+  "google/gemini-2.5-pro": { input: 1.25, output: 10.00 },
+};
+const DEFAULT_PRICING = { input: 0.50, output: 1.50 };
+
+async function logUsage(supabase: any, userId: string, featureType: string, model: string, inputChars: number, outputChars: number) {
+  try {
+    const inputTokens = Math.ceil(inputChars / 4);
+    const outputTokens = Math.ceil(outputChars / 4);
+    const pricing = MODEL_PRICING[model] || DEFAULT_PRICING;
+    const cost = (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000;
+    await supabase.from("api_usage_logs").insert({
+      user_id: userId,
+      feature_type: featureType,
+      model_used: model,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      estimated_cost_usd: cost,
+    });
+  } catch (e) {
+    console.error("Failed to log usage:", e);
+  }
+}
+
 interface AIConfig {
   provider: "anthropic" | "openai" | "google" | "lovable";
   apiKey: string;
@@ -537,6 +565,12 @@ serve(async (req) => {
       regexIntent ? Promise.resolve(regexIntent) : classifyIntent(lastUserMsg),
     ]);
 
+    // Log intent classification if AI was used
+    if (!regexIntent) {
+      const intentInputChars = lastUserMsg.length + 500; // system prompt for classifier is ~500 chars
+      await logUsage(supabase, user.id, "chip_intent", "google/gemini-2.5-flash-lite", intentInputChars, 100);
+    }
+
     console.log("Intent classification:", JSON.stringify(intent), regexIntent ? "(regex)" : "(AI)");
 
     // Step 2: Fetch only the data Chip needs
@@ -550,6 +584,9 @@ serve(async (req) => {
     // Step 4: Trim conversation history to last 6 messages (3 exchanges)
     const trimmedMessages = messages.length > 6 ? messages.slice(-6) : messages;
     const fullMessages = [{ role: "system", content: systemPrompt }, ...trimmedMessages];
+
+    // Calculate input chars for usage logging
+    const inputChars = fullMessages.reduce((sum: number, m: any) => sum + (m.content?.length || 0), 0);
 
     let streamRes: Response;
 
@@ -565,58 +602,73 @@ serve(async (req) => {
       throw new Error("Unsupported provider");
     }
 
-    if (aiConfig.provider === "anthropic") {
-      const reader = streamRes.body!.getReader();
+    // Helper to wrap a stream and log usage when done
+    const wrapStreamWithLogging = (originalStream: ReadableStream<Uint8Array>, transformFn?: (line: string, controller: ReadableStreamDefaultController) => string | null) => {
+      const reader = originalStream.getReader();
       const decoder = new TextDecoder();
       const encoder = new TextEncoder();
-      const stream = new ReadableStream({
+      let outputChars = 0;
+
+      return new ReadableStream({
         async pull(controller) {
           const { done, value } = await reader.read();
-          if (done) { controller.enqueue(encoder.encode("data: [DONE]\n\n")); controller.close(); return; }
+          if (done) {
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            controller.close();
+            logUsage(supabase, user!.id, "chip_chat", aiConfig.model, inputChars, outputChars);
+            return;
+          }
           const text = decoder.decode(value, { stream: true });
           for (const line of text.split("\n")) {
             if (!line.startsWith("data: ")) continue;
             const jsonStr = line.slice(6).trim();
-            if (!jsonStr) continue;
+            if (!jsonStr || jsonStr === "[DONE]") continue;
             try {
-              const evt = JSON.parse(jsonStr);
-              if (evt.type === "content_block_delta" && evt.delta?.text) {
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: evt.delta.text } }] })}\n\n`));
+              if (transformFn) {
+                const content = transformFn(jsonStr, controller);
+                if (content) outputChars += content.length;
+              } else {
+                const evt = JSON.parse(jsonStr);
+                const content = evt.choices?.[0]?.delta?.content;
+                if (content) outputChars += content.length;
+                controller.enqueue(encoder.encode(`data: ${jsonStr}\n\n`));
               }
             } catch {}
           }
         },
+      });
+    };
+
+    if (aiConfig.provider === "anthropic") {
+      const stream = wrapStreamWithLogging(streamRes.body!, (jsonStr, controller) => {
+        const evt = JSON.parse(jsonStr);
+        if (evt.type === "content_block_delta" && evt.delta?.text) {
+          const encoder = new TextEncoder();
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: evt.delta.text } }] })}\n\n`));
+          return evt.delta.text;
+        }
+        return null;
       });
       return new Response(stream, { headers: { ...corsHeaders, "Content-Type": "text/event-stream" } });
     }
 
     if (aiConfig.provider === "google") {
-      const reader = streamRes.body!.getReader();
-      const decoder = new TextDecoder();
-      const encoder = new TextEncoder();
-      const stream = new ReadableStream({
-        async pull(controller) {
-          const { done, value } = await reader.read();
-          if (done) { controller.enqueue(encoder.encode("data: [DONE]\n\n")); controller.close(); return; }
-          const text = decoder.decode(value, { stream: true });
-          for (const line of text.split("\n")) {
-            if (!line.startsWith("data: ")) continue;
-            const jsonStr = line.slice(6).trim();
-            if (!jsonStr) continue;
-            try {
-              const evt = JSON.parse(jsonStr);
-              const content = evt.candidates?.[0]?.content?.parts?.[0]?.text;
-              if (content) {
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`));
-              }
-            } catch {}
-          }
-        },
+      const stream = wrapStreamWithLogging(streamRes.body!, (jsonStr, controller) => {
+        const evt = JSON.parse(jsonStr);
+        const content = evt.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (content) {
+          const encoder = new TextEncoder();
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`));
+          return content;
+        }
+        return null;
       });
       return new Response(stream, { headers: { ...corsHeaders, "Content-Type": "text/event-stream" } });
     }
 
-    return new Response(streamRes.body, {
+    // Lovable/OpenAI — pass through but track output
+    const stream = wrapStreamWithLogging(streamRes.body!);
+    return new Response(stream, {
       headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
     });
   } catch (e) {

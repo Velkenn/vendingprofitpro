@@ -7,6 +7,33 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  "google/gemini-2.5-flash-lite": { input: 0.075, output: 0.30 },
+  "google/gemini-2.5-flash": { input: 0.15, output: 0.60 },
+  "google/gemini-3-flash-preview": { input: 0.15, output: 0.60 },
+  "google/gemini-2.5-pro": { input: 1.25, output: 10.00 },
+};
+const DEFAULT_PRICING = { input: 0.50, output: 1.50 };
+
+async function logUsage(supabase: any, userId: string, featureType: string, model: string, inputChars: number, outputChars: number) {
+  try {
+    const inputTokens = Math.ceil(inputChars / 4);
+    const outputTokens = Math.ceil(outputChars / 4);
+    const pricing = MODEL_PRICING[model] || DEFAULT_PRICING;
+    const cost = (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000;
+    await supabase.from("api_usage_logs").insert({
+      user_id: userId,
+      feature_type: featureType,
+      model_used: model,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      estimated_cost_usd: cost,
+    });
+  } catch (e) {
+    console.error("Failed to log usage:", e);
+  }
+}
+
 const EXTRACT_TOOL = {
   type: "function",
   function: {
@@ -979,6 +1006,8 @@ serve(async (req) => {
       try {
         parsed = await parseImageWithUserProvider(bytes, file_path, aiConfig.provider, aiConfig.apiKey, aiConfig.model);
         console.log(`AI vision succeeded: ${parsed.items?.length || 0} items`);
+        const outputEstimate = JSON.stringify(parsed).length;
+        await logUsage(supabase, receiptForAI.user_id, "receipt_parse", aiConfig.model, bytes.length, outputEstimate);
       } catch (aiErr: any) {
         console.error("AI vision error:", aiErr.message);
         await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
@@ -1018,6 +1047,8 @@ serve(async (req) => {
         try {
           parsed = await parseWithUserProvider(rawText, aiConfig.provider, aiConfig.apiKey, aiConfig.model);
           console.log(`AI succeeded: ${parsed.items?.length || 0} items`);
+          const outputEstimate = JSON.stringify(parsed).length;
+          await logUsage(supabase, receiptForAI.user_id, "receipt_parse", aiConfig.model, rawText.length + SYSTEM_PROMPT.length, outputEstimate);
         } catch (aiErr: any) {
           console.error("AI error:", aiErr.message);
           await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
@@ -1145,6 +1176,9 @@ serve(async (req) => {
           existingSkuNames
         );
         console.log(`Normalized ${normalizedMap.size} names`);
+        const normInputChars = rawNamesToNormalize.join("").length + 500;
+        const normOutputChars = Array.from(normalizedMap.values()).join("").length;
+        await logUsage(supabase, receiptForAI.user_id, "receipt_normalize", aiConfig.model, normInputChars, normOutputChars);
       }
 
       // Build items, matching/creating SKUs as needed

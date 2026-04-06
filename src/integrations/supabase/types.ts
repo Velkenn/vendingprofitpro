@@ -47,6 +47,39 @@ export type Database = {
         }
         Relationships: []
       }
+      api_usage_logs: {
+        Row: {
+          created_at: string
+          estimated_cost_usd: number | null
+          feature_type: string
+          id: string
+          input_tokens: number | null
+          model_used: string
+          output_tokens: number | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          estimated_cost_usd?: number | null
+          feature_type: string
+          id?: string
+          input_tokens?: number | null
+          model_used: string
+          output_tokens?: number | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          estimated_cost_usd?: number | null
+          feature_type?: string
+          id?: string
+          input_tokens?: number | null
+          model_used?: string
+          output_tokens?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       chip_memories: {
         Row: {
           created_at: string
@@ -433,6 +466,7 @@ export type Database = {
           sku_name: string
         }[]
       }
+      is_admin_user: { Args: never; Returns: boolean }
     }
     Enums: {
       parse_status_type: "PENDING" | "PARSED" | "PARTIAL_PARSE" | "FAILED"
