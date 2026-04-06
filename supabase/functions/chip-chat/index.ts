@@ -210,7 +210,10 @@ async function streamWithGoogle(apiKey: string, model: string, messages: any[]) 
       generationConfig: { maxOutputTokens: 4096 },
     }),
   });
-  if (!res.ok) throw new Error(`Google error: ${res.status}`);
+  if (!res.ok) {
+    if (res.status === 429) throw new Error("RATE_LIMIT");
+    throw new Error(`Google error: ${res.status}`);
+  }
   return res;
 }
 
