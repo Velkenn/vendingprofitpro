@@ -1176,6 +1176,9 @@ serve(async (req) => {
           existingSkuNames
         );
         console.log(`Normalized ${normalizedMap.size} names`);
+        const normInputChars = rawNamesToNormalize.join("").length + 500;
+        const normOutputChars = Array.from(normalizedMap.values()).join("").length;
+        await logUsage(supabase, receiptForAI.user_id, "receipt_normalize", aiConfig.model, normInputChars, normOutputChars);
       }
 
       // Build items, matching/creating SKUs as needed
