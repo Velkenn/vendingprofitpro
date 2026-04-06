@@ -20,6 +20,7 @@ import Purchases from "@/pages/Purchases";
 import CostTrends from "@/pages/CostTrends";
 import ProfitLeaderboard from "@/pages/ProfitLeaderboard";
 import SettingsPage from "@/pages/SettingsPage";
+import AdminPanel from "@/pages/AdminPanel";
 import Export from "@/pages/Export";
 import Machines from "@/pages/Machines";
 import MachineDetail from "@/pages/MachineDetail";
@@ -56,6 +57,7 @@ function AppRoutes() {
         <Route path="/app/machines/:id" element={<MachineDetail />} />
         <Route path="/app/chat" element={<Chat />} />
         <Route path="/app/settings" element={<SettingsPage />} />
+        <Route path="/app/admin" element={<AdminPanel />} />
         <Route path="/app/export" element={<Export />} />
       </Route>
       <Route path="*" element={<NotFound />} />

@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { LogOut, FileDown, Zap, Package } from "lucide-react";
+import { LogOut, FileDown, Zap, Package, Shield } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import AISettingsDialog from "@/components/settings/AISettingsDialog";
 
@@ -71,6 +71,23 @@ export default function SettingsPage() {
   return (
     <div className="px-4 pt-6">
       <h1 className="mb-4 text-2xl font-bold tracking-tight">Settings</h1>
+
+      {/* Admin Panel (owner only) */}
+      {user?.email === "sdodd987@gmail.com" && (
+        <Card className="border-0 shadow-sm mb-4">
+          <CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="font-medium text-sm">Admin Panel</p>
+                <p className="text-xs text-muted-foreground">View API usage and costs</p>
+              </div>
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => navigate("/app/admin")}>
+                <Shield className="h-4 w-4" /> Open
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* SKUs Link */}
       <Card className="border-0 shadow-sm mb-4">
