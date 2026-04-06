@@ -206,146 +206,149 @@ export default function Chat() {
 
   return (
     <div className="flex flex-col h-[calc(100dvh-7.5rem)]">
-      {/* Header */}
-      <div className="px-4 pt-4 pb-2">
-        <div className="flex items-center gap-2 mb-3">
-          <div className="flex items-center justify-center h-8 w-8 rounded-full bg-primary/10">
-            <Bot className="h-5 w-5 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-lg font-bold leading-tight">Chip</h1>
-            <p className="text-xs text-muted-foreground">Your vending business assistant</p>
-          </div>
-        </div>
-
-        {/* Chip's Memory */}
-        <Collapsible open={memoryOpen} onOpenChange={setMemoryOpen}>
-          <CollapsibleTrigger asChild>
-            <Card className="border-0 shadow-sm cursor-pointer">
-              <CardContent className="p-3 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 text-primary" />
-                  <span className="text-sm font-medium">Chip's Memory</span>
-                  {memories.length > 0 && (
-                    <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">{memories.length}</span>
-                  )}
-                </div>
-                {memoryOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-              </CardContent>
-            </Card>
-          </CollapsibleTrigger>
-          <CollapsibleContent>
-            <Card className="border-0 shadow-sm mt-1">
-              <CardContent className="p-3 space-y-2 max-h-40 overflow-y-auto">
-                {memories.length === 0 ? (
-                  <p className="text-xs text-muted-foreground">No saved memories yet. Save insights from Chip's responses!</p>
-                ) : (
-                  memories.map((m) => (
-                    <div key={m.id} className="flex items-start gap-2 text-xs">
-                      <p className="flex-1 text-muted-foreground">{m.memory_text.slice(0, 150)}{m.memory_text.length > 150 ? "…" : ""}</p>
-                      <button onClick={() => deleteMemory(m.id)} className="text-destructive hover:text-destructive/80 mt-0.5 shrink-0">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-          </CollapsibleContent>
-        </Collapsible>
-      </div>
-
-      {/* Chat area */}
-      <div className="flex-1 overflow-y-auto px-4 py-2 space-y-3 scroll-touch">
-        {messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full gap-4 pb-8">
-            <div className="flex items-center justify-center h-16 w-16 rounded-full bg-primary/10">
-              <Bot className="h-9 w-9 text-primary" />
+      {/* Scrollable area: header + memory + chat */}
+      <div className="flex-1 overflow-y-auto scroll-touch">
+        {/* Header */}
+        <div className="px-4 pt-4 pb-2">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="flex items-center justify-center h-8 w-8 rounded-full bg-primary/10">
+              <Bot className="h-5 w-5 text-primary" />
             </div>
-            <p className="text-sm text-muted-foreground text-center max-w-xs">
-              Ask me anything about your vending business — profits, costs, trends, restocking advice, and more.
-            </p>
-            <div className="grid grid-cols-2 gap-2 w-full max-w-sm">
-              {SUGGESTIONS.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => sendMessage(s)}
-                  className="text-left text-xs p-3 rounded-lg border bg-card hover:bg-accent transition-colors"
-                >
-                  {s}
-                </button>
-              ))}
+            <div>
+              <h1 className="text-lg font-bold leading-tight">Chip</h1>
+              <p className="text-xs text-muted-foreground">Your vending business assistant</p>
             </div>
           </div>
-        ) : (
-          messages.map((msg, i) => (
-            <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-              <div className={`flex gap-2 max-w-[85%] ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
-                {msg.role === "assistant" && (
-                  <div className="flex items-start pt-1 shrink-0">
-                    <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center">
-                      <Bot className="h-3.5 w-3.5 text-primary" />
-                    </div>
-                  </div>
-                )}
-                <div>
-                  <div
-                    className={`rounded-2xl px-3.5 py-2.5 text-sm ${
-                      msg.role === "user"
-                        ? "bg-primary text-primary-foreground rounded-br-md"
-                        : "bg-card border rounded-bl-md"
-                    }`}
-                  >
-                    {msg.role === "assistant" ? (
-                      <div className="prose prose-sm max-w-none dark:prose-invert [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
-                        <ReactMarkdown>{msg.content}</ReactMarkdown>
-                      </div>
-                    ) : (
-                      msg.content
+
+          {/* Chip's Memory */}
+          <Collapsible open={memoryOpen} onOpenChange={setMemoryOpen}>
+            <CollapsibleTrigger asChild>
+              <Card className="border-0 shadow-sm cursor-pointer">
+                <CardContent className="p-3 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-primary" />
+                    <span className="text-sm font-medium">Chip's Memory</span>
+                    {memories.length > 0 && (
+                      <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded-full">{memories.length}</span>
                     )}
                   </div>
-                  {msg.role === "assistant" && !isLoading && (
-                    <div className="flex items-center gap-3 mt-1 ml-1">
-                      <button
-                        onClick={() => copyToClipboard(i)}
-                        className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
-                      >
-                        {copiedIndex === i ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                        {copiedIndex === i ? "Copied!" : "Copy"}
-                      </button>
-                      <button
-                        onClick={() => saveMemory(msg.content)}
-                        className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
-                      >
-                        <Bookmark className="h-3 w-3" /> Save to Memory
-                      </button>
+                  {memoryOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                </CardContent>
+              </Card>
+            </CollapsibleTrigger>
+            <CollapsibleContent>
+              <Card className="border-0 shadow-sm mt-1">
+                <CardContent className="p-3 space-y-2 max-h-40 overflow-y-auto">
+                  {memories.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No saved memories yet. Save insights from Chip's responses!</p>
+                  ) : (
+                    memories.map((m) => (
+                      <div key={m.id} className="flex items-start gap-2 text-xs">
+                        <p className="flex-1 text-muted-foreground">{m.memory_text.slice(0, 150)}{m.memory_text.length > 150 ? "…" : ""}</p>
+                        <button onClick={() => deleteMemory(m.id)} className="text-destructive hover:text-destructive/80 mt-0.5 shrink-0">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+            </CollapsibleContent>
+          </Collapsible>
+        </div>
+
+        {/* Chat messages */}
+        <div className="px-4 py-2 space-y-3">
+          {messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center min-h-[50vh] gap-4 pb-8">
+              <div className="flex items-center justify-center h-16 w-16 rounded-full bg-primary/10">
+                <Bot className="h-9 w-9 text-primary" />
+              </div>
+              <p className="text-sm text-muted-foreground text-center max-w-xs">
+                Ask me anything about your vending business — profits, costs, trends, restocking advice, and more.
+              </p>
+              <div className="grid grid-cols-2 gap-2 w-full max-w-sm">
+                {SUGGESTIONS.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => sendMessage(s)}
+                    className="text-left text-xs p-3 rounded-lg border bg-card hover:bg-accent transition-colors"
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            messages.map((msg, i) => (
+              <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                <div className={`flex gap-2 max-w-[85%] ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
+                  {msg.role === "assistant" && (
+                    <div className="flex items-start pt-1 shrink-0">
+                      <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center">
+                        <Bot className="h-3.5 w-3.5 text-primary" />
+                      </div>
                     </div>
                   )}
+                  <div>
+                    <div
+                      className={`rounded-2xl px-3.5 py-2.5 text-sm ${
+                        msg.role === "user"
+                          ? "bg-primary text-primary-foreground rounded-br-md"
+                          : "bg-card border rounded-bl-md"
+                      }`}
+                    >
+                      {msg.role === "assistant" ? (
+                        <div className="prose prose-sm max-w-none dark:prose-invert [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+                          <ReactMarkdown>{msg.content}</ReactMarkdown>
+                        </div>
+                      ) : (
+                        msg.content
+                      )}
+                    </div>
+                    {msg.role === "assistant" && !isLoading && (
+                      <div className="flex items-center gap-3 mt-1 ml-1">
+                        <button
+                          onClick={() => copyToClipboard(i)}
+                          className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
+                        >
+                          {copiedIndex === i ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                          {copiedIndex === i ? "Copied!" : "Copy"}
+                        </button>
+                        <button
+                          onClick={() => saveMemory(msg.content)}
+                          className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary transition-colors"
+                        >
+                          <Bookmark className="h-3 w-3" /> Save to Memory
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+          {isLoading && messages[messages.length - 1]?.role === "user" && (
+            <div className="flex justify-start">
+              <div className="flex gap-2 items-start">
+                <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                  <Bot className="h-3.5 w-3.5 text-primary" />
+                </div>
+                <div className="rounded-2xl rounded-bl-md bg-card border px-3.5 py-2.5">
+                  <div className="flex gap-1">
+                    <span className="w-1.5 h-1.5 bg-muted-foreground/50 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+                    <span className="w-1.5 h-1.5 bg-muted-foreground/50 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+                    <span className="w-1.5 h-1.5 bg-muted-foreground/50 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                  </div>
                 </div>
               </div>
             </div>
-          ))
-        )}
-        {isLoading && messages[messages.length - 1]?.role === "user" && (
-          <div className="flex justify-start">
-            <div className="flex gap-2 items-start">
-              <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                <Bot className="h-3.5 w-3.5 text-primary" />
-              </div>
-              <div className="rounded-2xl rounded-bl-md bg-card border px-3.5 py-2.5">
-                <div className="flex gap-1">
-                  <span className="w-1.5 h-1.5 bg-muted-foreground/50 rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                  <span className="w-1.5 h-1.5 bg-muted-foreground/50 rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                  <span className="w-1.5 h-1.5 bg-muted-foreground/50 rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-        <div ref={bottomRef} />
+          )}
+          <div ref={bottomRef} />
+        </div>
       </div>
 
-      {/* Input */}
+      {/* Input — always visible */}
       <form onSubmit={handleSubmit} className="px-4 pb-4 pt-2 border-t bg-background">
         <div className="flex gap-2">
           <Input

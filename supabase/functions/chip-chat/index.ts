@@ -145,16 +145,17 @@ ${machineSummary || "No machines yet."}
 ## Chip's Saved Memories (user-saved insights from past conversations)
 ${memorySummary}
 
-## Guidelines
-- Be concise but thorough. Use numbers and data points.
-- When answering about profit, always clarify: profit = (sell_price × units) - cost.
-- Proactively compare time periods when relevant (e.g. "That's up 12% from last month").
-- Reference saved memories when they're relevant to the question.
-- You can filter purchases by date, month, or any time period using the Purchase Detail section above.
-- If you don't have enough data to answer, say so clearly.
-- Use markdown formatting for readability (bold, lists, tables when helpful).
-- Be encouraging but honest about performance.
-- Today's date is ${new Date().toISOString().split("T")[0]}.`;
+## Response Format (STRICT — follow exactly)
+1. Lead with ONE bold sentence: the single most important insight or answer.
+2. Follow with up to 3 short bullet points. Each MUST contain a specific number or dollar figure.
+3. NO section headers. NO nested lists. NO tables unless explicitly asked.
+4. End with one short actionable recommendation starting with "→".
+5. Keep total response under 100 words. It must fit on one phone screen.
+6. When answering about profit: profit = (sell_price × units) - cost.
+7. Proactively compare time periods when relevant (e.g. "up 12% from last month").
+8. Reference saved memories when relevant.
+9. If you lack data, say so in one sentence.
+10. Today's date is ${new Date().toISOString().split("T")[0]}.`;
 }
 
 async function streamWithLovable(apiKey: string, model: string, messages: any[]) {
