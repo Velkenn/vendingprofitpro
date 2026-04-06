@@ -6,6 +6,34 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+// --- Pricing table (per 1M tokens) ---
+const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  "google/gemini-2.5-flash-lite": { input: 0.075, output: 0.30 },
+  "google/gemini-2.5-flash": { input: 0.15, output: 0.60 },
+  "google/gemini-3-flash-preview": { input: 0.15, output: 0.60 },
+  "google/gemini-2.5-pro": { input: 1.25, output: 10.00 },
+};
+const DEFAULT_PRICING = { input: 0.50, output: 1.50 };
+
+async function logUsage(supabase: any, userId: string, featureType: string, model: string, inputChars: number, outputChars: number) {
+  try {
+    const inputTokens = Math.ceil(inputChars / 4);
+    const outputTokens = Math.ceil(outputChars / 4);
+    const pricing = MODEL_PRICING[model] || DEFAULT_PRICING;
+    const cost = (inputTokens * pricing.input + outputTokens * pricing.output) / 1_000_000;
+    await supabase.from("api_usage_logs").insert({
+      user_id: userId,
+      feature_type: featureType,
+      model_used: model,
+      input_tokens: inputTokens,
+      output_tokens: outputTokens,
+      estimated_cost_usd: cost,
+    });
+  } catch (e) {
+    console.error("Failed to log usage:", e);
+  }
+}
+
 interface AIConfig {
   provider: "anthropic" | "openai" | "google" | "lovable";
   apiKey: string;
