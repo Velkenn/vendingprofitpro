@@ -9,7 +9,7 @@ const corsHeaders = {
 const PROVIDER_MODELS: Record<string, string[]> = {
   anthropic: ["claude-opus-4", "claude-sonnet-4"],
   openai: ["gpt-4o", "gpt-4-turbo"],
-  google: ["gemini-2.5-pro", "gemini-2.5-flash"],
+  google: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
 };
 
 async function testProviderKey(provider: string, apiKey: string, model: string): Promise<{ ok: boolean; error?: string }> {
