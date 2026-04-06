@@ -1,77 +1,56 @@
 
 
-## Optimize Chip: Smart Data Retrieval + Flash-Lite Default + Filter Failed SKUs
+## Reduce Chip's API Cost
 
-### Overview
-Three changes: (1) add Gemini 2.5 Flash-Lite as a model option and make it Chip's default, (2) replace the "fetch everything" approach with intent-based selective querying, (3) exclude Failed/Do Not Rebuy SKUs from advice.
+### Problem
+Three factors compound to make each Chip message expensive:
+1. Entire database serialized as text in system prompt (biggest cost)
+2. Two API calls per message (intent classification + response)
+3. Full conversation history resent each time, multiplying the prompt size
 
-### 1. Add Flash-Lite to AI Settings
+### Proposed Optimizations
 
-**Edit: `src/components/settings/AISettingsDialog.tsx`**
-- Add `"gemini-2.5-flash-lite"` to the Google provider's models array (line 61)
+**A. Pre-aggregate data server-side instead of dumping raw rows**
 
-**Edit: `supabase/functions/ai-settings/index.ts`**
-- Add `"gemini-2.5-flash-lite"` to the `PROVIDER_MODELS.google` array
+Instead of sending every individual receipt line item and sale entry as text, compute summaries in the edge function before building the prompt:
 
-### 2. Set Flash-Lite as Chip's Default Model
+- **SKUs**: Keep as-is (compact, needed for context)
+- **Items**: Replace raw line-item dump with per-SKU aggregates: `SKU Name: 45 units across 8 purchases, avg cost $0.82/unit, last bought 2026-03-15`
+- **Receipts**: Replace individual receipt lines with monthly summaries: `March 2026: 12 receipts, $847 total, top vendors: Sam's Club (7), Costco (5)`
+- **Sales**: Replace per-date entries with weekly/monthly aggregates per machine: `Machine A - March 2026: $520 revenue (cash $310, credit $210), 4 weeks logged`
+- **Only include raw detail when the intent is narrow** (specific date, specific SKU, specific machine) — for broad questions, use summaries only
 
-**Edit: `supabase/functions/chip-chat/index.ts`** (line 50)
-- Change the Lovable fallback model from `"google/gemini-3-flash-preview"` to `"google/gemini-2.5-flash-lite"`
+This could reduce prompt size by 80-90% for users with large datasets while preserving the information Chip needs.
 
-### 3. Smart Intent-Based Data Retrieval
+**B. Cache intent classification for similar questions**
+
+Skip the classification API call when the question clearly matches a simple pattern (regex-based):
+- Contains "machine" or "revenue" → needs_machines + needs_sales
+- Contains "SKU" or "product" or "profit" → needs_skus + needs_items
+- Contains specific month name → set date_filter
+- Only call the AI classifier for ambiguous questions
+
+This eliminates the second API call ~70% of the time.
+
+**C. Limit conversation history in the API call**
+
+Instead of sending all messages, only send the last 6 messages (3 exchanges) plus the system prompt. Older context rarely matters and dramatically inflates token count on longer conversations.
+
+### Implementation
 
 **Edit: `supabase/functions/chip-chat/index.ts`**
 
-Replace the current flow (fetch all data → build prompt → call AI) with a two-step approach:
+1. Add a `summarizeContext()` function that takes the raw fetched data and produces aggregated summaries instead of row-by-row text
+2. In `buildSystemPrompt`, use summaries for broad queries and raw detail only for narrow/filtered queries
+3. Add regex-based intent shortcutting before the AI classification call
+4. Trim `messages` array to last 6 entries before sending to AI
 
-**Step A — Classify the question's intent** using a cheap, fast call to Flash-Lite via the Lovable gateway. Send the user's latest message with a small system prompt asking it to return a JSON object like:
-```json
-{
-  "needs_skus": true,
-  "needs_receipts": false,
-  "needs_items": false,
-  "needs_machines": true,
-  "needs_sales": true,
-  "date_filter": "2026-03",
-  "broad": false
-}
-```
-
-Use tool calling / structured output to guarantee JSON. This is a ~20 token input, ~30 token output call — negligible cost.
-
-**Step B — Selective fetch** based on the intent flags:
-- Only query the tables flagged as `true`
-- If `date_filter` is present, add `.gte("receipt_date", startDate).lte("receipt_date", endDate)` on receipts, or `.gte("date", ...)` on machine_sales
-- If `broad` is true, fetch everything (current behavior)
-- Always fetch `chip_memories` (tiny table, always relevant)
-
-**Step C — Build a trimmed system prompt** that only includes sections for the data actually fetched. Empty sections are omitted entirely.
-
-### 4. Exclude Failed SKUs from Advice
-
-**Edit: `supabase/functions/chip-chat/index.ts`** — `buildSystemPrompt`
-
-- Filter out SKUs with `rebuy_status === 'Failed'` from the SKU summary and profit analysis sections
-- Add a line to the system prompt: "SKUs marked as Failed or Do Not Rebuy have been excluded. Do not recommend or analyze them — the user has already moved on from those products."
-
-### 5. Deploy
-
-Deploy the updated `chip-chat` and `ai-settings` edge functions.
-
-### Technical Details
-
-**Intent classification prompt** (sent to `google/gemini-2.5-flash-lite` via Lovable gateway):
-```
-Analyze this vending business question and return JSON indicating which data tables are needed.
-Tables: skus (product catalog), receipts (purchase records), items (line items on receipts), machines (vending machines), sales (machine revenue by date).
-Set date_filter to a YYYY-MM string if the question mentions a specific month/period.
-Set broad=true only if the question asks for a comprehensive overview.
-```
-
-**Fallback**: If the intent classification fails (network error, parse error), fall back to fetching all data (current behavior) so the feature degrades gracefully.
+### Expected Impact
+- **Broad questions**: ~80-90% fewer input tokens (summaries vs raw rows)
+- **Narrow questions**: Similar cost (already filtered by intent + date)
+- **Classification**: ~70% of messages skip the classification API call entirely
+- **Long conversations**: Constant cost after 3 exchanges instead of linear growth
 
 ### Files changed
-- **Edit**: `supabase/functions/chip-chat/index.ts` — intent classification, selective fetch, exclude Failed SKUs, default model change
-- **Edit**: `supabase/functions/ai-settings/index.ts` — add flash-lite to allowed models
-- **Edit**: `src/components/settings/AISettingsDialog.tsx` — add flash-lite to UI model list
+- **Edit**: `supabase/functions/chip-chat/index.ts` — add summarization, regex intent shortcuts, conversation trimming
 
