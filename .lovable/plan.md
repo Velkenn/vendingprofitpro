@@ -1,104 +1,44 @@
 
 
-## Admin Panel with API Usage Tracking
+## Simplify Chip: Raw Data with Time Limits, No Separate Intent Call
 
-### Overview
-Create a usage-tracking system that logs every AI API call across the app, and build an admin-only panel to visualize costs. Only `sdodd987@gmail.com` can access it.
+### Problem
+Current approach uses summarized/aggregated data for broad queries (losing detail) and makes a separate AI API call for intent classification when regex doesn't match (adding cost and latency).
 
-### 1. Database Migration
-
-Create `api_usage_logs` table:
-```sql
-CREATE TABLE public.api_usage_logs (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL,
-  feature_type text NOT NULL,        -- 'chip_chat', 'chip_intent', 'receipt_parse', 'receipt_normalize'
-  model_used text NOT NULL,
-  input_tokens integer DEFAULT 0,
-  output_tokens integer DEFAULT 0,
-  estimated_cost_usd numeric DEFAULT 0,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-
-ALTER TABLE public.api_usage_logs ENABLE ROW LEVEL SECURITY;
-
--- Only the owner can read all logs
-CREATE OR REPLACE FUNCTION public.is_admin_user()
-RETURNS boolean
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT (SELECT email FROM auth.users WHERE id = auth.uid()) = 'sdodd987@gmail.com'
-$$;
-
-CREATE POLICY "Admin can view all logs"
-  ON public.api_usage_logs FOR SELECT
-  TO authenticated
-  USING (public.is_admin_user());
-
--- Edge functions insert via service role, so no INSERT policy needed for users
--- But add one so the service role key works through RLS:
-CREATE POLICY "Service insert"
-  ON public.api_usage_logs FOR INSERT
-  TO authenticated
-  WITH CHECK (true);
-
-CREATE INDEX idx_api_usage_logs_created ON public.api_usage_logs (created_at DESC);
-CREATE INDEX idx_api_usage_logs_feature ON public.api_usage_logs (feature_type);
-```
-
-### 2. Edge Function Logging
+### Changes
 
 **Edit: `supabase/functions/chip-chat/index.ts`**
 
-Add a `logUsage` helper that inserts into `api_usage_logs` using the service role client (already available). Call it after the streaming response completes — since we can't easily count tokens from a stream, estimate based on system prompt character count (~4 chars/token for input) and track it. For the intent classification call, log separately with `feature_type: 'chip_intent'`.
+**A. Remove the AI intent classification call entirely**
+- Delete the `classifyIntent()` function (lines 148-222)
+- Remove the `if (!regexIntent)` AI classifier branch and its usage logging (lines 563-574)
+- When regex doesn't match, fall back to a default intent that fetches everything (same as current `defaultIntent`) — no API call needed
+- The main model will handle understanding the question naturally from the data provided
 
-Pricing table (per 1M tokens, embedded in the function):
-- `google/gemini-2.5-flash-lite`: input $0.075, output $0.30
-- `google/gemini-2.5-flash`: input $0.15, output $0.60
-- `google/gemini-3-flash-preview`: input $0.15, output $0.60
-- `google/gemini-2.5-pro`: input $1.25, output $10.00
-- Default fallback: input $0.50, output $1.50
+**B. Apply time-based limits to data fetching in `fetchSelectiveContext()`**
+- **Receipts**: Always filter to last 90 days (`receipt_date >= now() - 90 days`), unless a specific `date_filter` month is set
+- **Receipt items**: Join with receipts to only fetch items from the last 90 days of receipts (fetch receipt IDs first, then filter items by those IDs)
+- **Machine sales**: Always filter to last 6 months (`date >= now() - 6 months`), unless a specific `date_filter` is set
+- **SKUs**: Fetch all (they're compact catalog data)
+- **Memories**: Fetch all (already small)
 
-Since streaming doesn't return token counts, estimate:
-- Input tokens: count characters in system prompt + messages, divide by 4
-- Output tokens: count characters in streamed response, divide by 4
+**C. Remove the summarization layer**
+- Delete the `summarizeForBroadQuery()` function (lines 291-375)
+- Remove the `intent.broad ? summarizeForBroadQuery(rawCtx) : rawCtx` conditional (line 580)
+- Always pass raw data directly to `buildSystemPrompt()`
+- Remove all references to `receiptSummary`, `itemSummary`, `salesSummary` in `buildSystemPrompt()` — only keep the raw-data rendering paths
 
-**Edit: `supabase/functions/parse-receipt/index.ts`**
+**D. Update `buildSystemPrompt()` to only use raw data sections**
+- Remove the conditional branches that check for `ctx.receiptSummary`, `ctx.itemSummary`, `ctx.salesSummary`
+- Keep the existing raw-data rendering logic (which already formats SKUs, items, receipts, machines, sales nicely)
+- Add a note in the system prompt: "Data shown is from the last 90 days for purchases and 6 months for machine revenue"
 
-Add the same `logUsage` helper. Log after each AI call:
-- Receipt extraction call → `feature_type: 'receipt_parse'`
-- Name normalization call → `feature_type: 'receipt_normalize'`
-
-For non-streaming calls, try to extract `usage.prompt_tokens` and `usage.completion_tokens` from the response JSON when available (Lovable gateway and OpenAI return these). Fall back to character-based estimation.
-
-### 3. Admin Page
-
-**Create: `src/pages/AdminPanel.tsx`**
-
-A dashboard showing:
-- **Cost cards**: Total cost today, this week, this month (queries with date filters)
-- **Feature breakdown table**: Cost by `feature_type` this month
-- **Averages**: Average cost per `receipt_parse` call, average cost per `chip_chat` call
-- **Recent logs table**: Last 50 API calls with timestamp, feature, model, tokens, cost
-
-Gate access: check `user?.email === 'sdodd987@gmail.com'` — if not, redirect to `/app`.
-
-### 4. Routing + Navigation
-
-**Edit: `src/App.tsx`**
-- Import `AdminPanel` and add route `/app/admin`
-
-**Edit: `src/pages/SettingsPage.tsx`**
-- At the top, before "SKU Management" card, conditionally render an "Admin Panel" link if `user?.email === 'sdodd987@gmail.com'`
+### Expected Impact
+- One fewer API call per message when regex doesn't match (saves ~$0.001-0.005 per message)
+- Chip gets real row-level data for accurate answers instead of lossy summaries
+- Token count stays manageable via 90-day/6-month time windows instead of aggregation
+- Simpler code — removes ~150 lines of summarization logic
 
 ### Files changed
-- **Migration**: Create `api_usage_logs` table with RLS + `is_admin_user()` function
-- **Edit**: `supabase/functions/chip-chat/index.ts` — add usage logging after AI calls
-- **Edit**: `supabase/functions/parse-receipt/index.ts` — add usage logging after AI calls
-- **Create**: `src/pages/AdminPanel.tsx` — admin dashboard
-- **Edit**: `src/App.tsx` — add admin route
-- **Edit**: `src/pages/SettingsPage.tsx` — add admin link at top for owner
+- **Edit**: `supabase/functions/chip-chat/index.ts` — remove `classifyIntent()`, remove `summarizeForBroadQuery()`, add time filters to data fetching
 
