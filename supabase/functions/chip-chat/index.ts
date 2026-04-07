@@ -47,7 +47,6 @@ interface Intent {
   needs_machines: boolean;
   needs_sales: boolean;
   date_filter: string | null;
-  broad: boolean;
 }
 
 async function fetchAllRows(_table: string, query: any) {
@@ -100,173 +99,109 @@ const MONTH_NAMES: Record<string, string> = {
   jun: "06", jul: "07", aug: "08", sep: "09", oct: "10", nov: "11", dec: "12",
 };
 
-function tryRegexIntent(question: string): Intent | null {
+function detectIntent(question: string): Intent {
   const q = question.toLowerCase();
 
   // Extract date filter if present
   let date_filter: string | null = null;
-  // Match "March 2026", "jan 2025", etc.
   const monthYearMatch = q.match(/\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s+(\d{4})\b/);
   if (monthYearMatch) {
     date_filter = `${monthYearMatch[2]}-${MONTH_NAMES[monthYearMatch[1]]}`;
   }
-  // Match "2026-03" or "03/2026"
   const isoMatch = q.match(/\b(\d{4})-(\d{2})\b/);
   if (!date_filter && isoMatch) {
     date_filter = `${isoMatch[1]}-${isoMatch[2]}`;
   }
 
+  const defaultAll: Intent = { needs_skus: true, needs_receipts: true, needs_items: true, needs_machines: true, needs_sales: true, date_filter };
+
   // Broad/overview questions
   if (/\b(overview|summary|how.?s my business|full analysis|everything|dashboard|report)\b/.test(q)) {
-    return { needs_skus: true, needs_receipts: true, needs_items: true, needs_machines: true, needs_sales: true, date_filter, broad: true };
+    return defaultAll;
   }
 
   // Machine/revenue questions
   if (/\b(machine|revenue|vending|cash|credit|collection)\b/.test(q) && !/\b(sku|product|item|bought|purchase|receipt|cost|store)\b/.test(q)) {
-    return { needs_skus: false, needs_receipts: false, needs_items: false, needs_machines: true, needs_sales: true, date_filter, broad: false };
+    return { needs_skus: false, needs_receipts: false, needs_items: false, needs_machines: true, needs_sales: true, date_filter };
   }
 
   // SKU/product/profit questions
   if (/\b(sku|product|profit|margin|sell price|best seller|worst seller|rebuy)\b/.test(q) && !/\b(machine|revenue|collection)\b/.test(q)) {
-    return { needs_skus: true, needs_receipts: true, needs_items: true, needs_machines: false, needs_sales: false, date_filter, broad: false };
+    return { needs_skus: true, needs_receipts: true, needs_items: true, needs_machines: false, needs_sales: false, date_filter };
   }
 
   // Purchase/receipt/store questions
   if (/\b(receipt|purchase|bought|spend|spent|store|vendor|sam|walmart|costco)\b/.test(q) && !/\b(machine|revenue)\b/.test(q)) {
-    return { needs_skus: true, needs_receipts: true, needs_items: true, needs_machines: false, needs_sales: false, date_filter, broad: false };
+    return { needs_skus: true, needs_receipts: true, needs_items: true, needs_machines: false, needs_sales: false, date_filter };
   }
 
-  // If we matched a date but nothing else, still ambiguous
-  if (date_filter) {
-    return { needs_skus: true, needs_receipts: true, needs_items: true, needs_machines: true, needs_sales: true, date_filter, broad: false };
+  // Restock/inventory questions
+  if (/\b(restock|inventory|run out|running low|what.*(do|need).*this week|needs? attention|supply|stock up)\b/.test(q)) {
+    return { needs_skus: true, needs_receipts: true, needs_items: true, needs_machines: false, needs_sales: false, date_filter };
   }
 
-  return null; // Ambiguous — fall through to AI classifier
+  // Default: fetch everything
+  return defaultAll;
 }
 
-// AI-based intent classification (only called when regex doesn't match)
-async function classifyIntent(question: string): Promise<Intent> {
-  const defaultIntent: Intent = {
-    needs_skus: true, needs_receipts: true, needs_items: true,
-    needs_machines: true, needs_sales: true, date_filter: null, broad: true,
+function getDateCutoffs() {
+  const now = new Date();
+  const receipts90 = new Date(now);
+  receipts90.setDate(receipts90.getDate() - 90);
+  const sales6mo = new Date(now);
+  sales6mo.setMonth(sales6mo.getMonth() - 6);
+  return {
+    receiptCutoff: receipts90.toISOString().split("T")[0],
+    salesCutoff: sales6mo.toISOString().split("T")[0],
   };
-
-  const lovableKey = Deno.env.get("LOVABLE_API_KEY");
-  if (!lovableKey) return defaultIntent;
-
-  try {
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${lovableKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash-lite",
-        messages: [
-          {
-            role: "system",
-            content: `You are a query classifier for a vending business app. Analyze the user's question and call the classify_intent function to indicate which data tables are needed.
-Tables:
-- skus: product catalog (names, prices, categories, rebuy status)
-- receipts: purchase records (dates, vendors, totals, store locations)  
-- items: line items on receipts (individual products bought, quantities, costs)
-- machines: vending machines (names, locations)
-- sales: machine revenue by date (cash, credit amounts)
-
-Set date_filter to "YYYY-MM" if the question mentions a specific month/period. Set broad=true only for comprehensive overviews or when unsure.`,
-          },
-          { role: "user", content: question },
-        ],
-        tools: [{
-          type: "function",
-          function: {
-            name: "classify_intent",
-            description: "Classify which data tables are needed to answer the question",
-            parameters: {
-              type: "object",
-              properties: {
-                needs_skus: { type: "boolean" },
-                needs_receipts: { type: "boolean" },
-                needs_items: { type: "boolean" },
-                needs_machines: { type: "boolean" },
-                needs_sales: { type: "boolean" },
-                date_filter: { type: "string", description: "YYYY-MM format or null" },
-                broad: { type: "boolean" },
-              },
-              required: ["needs_skus", "needs_receipts", "needs_items", "needs_machines", "needs_sales", "broad"],
-            },
-          },
-        }],
-        tool_choice: { type: "function", function: { name: "classify_intent" } },
-      }),
-    });
-
-    if (!res.ok) return defaultIntent;
-
-    const data = await res.json();
-    const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-    if (!toolCall) return defaultIntent;
-
-    const parsed = JSON.parse(toolCall.function.arguments);
-    return {
-      needs_skus: parsed.needs_skus ?? true,
-      needs_receipts: parsed.needs_receipts ?? true,
-      needs_items: parsed.needs_items ?? true,
-      needs_machines: parsed.needs_machines ?? true,
-      needs_sales: parsed.needs_sales ?? true,
-      date_filter: parsed.date_filter || null,
-      broad: parsed.broad ?? true,
-    };
-  } catch (e) {
-    console.error("Intent classification failed, falling back to all data:", e);
-    return defaultIntent;
-  }
 }
 
 async function fetchSelectiveContext(supabase: any, userId: string, intent: Intent) {
   const fetches: Promise<any>[] = [];
   const keys: string[] = [];
+  const { receiptCutoff, salesCutoff } = getDateCutoffs();
 
   // Always fetch memories
   fetches.push(fetchAllRows("chip_memories", supabase.from("chip_memories").select("memory_text, created_at").eq("user_id", userId).order("created_at", { ascending: false })));
   keys.push("memories");
 
-  if (intent.needs_skus || intent.broad) {
+  if (intent.needs_skus) {
     fetches.push(fetchAllRows("skus", supabase.from("skus").select("id, sku_name, sell_price, category, rebuy_status, default_is_personal").eq("user_id", userId)));
     keys.push("skus");
   }
 
-  if (intent.needs_receipts || intent.broad) {
+  if (intent.needs_receipts) {
     let q = supabase.from("receipts").select("id, vendor, receipt_date, store_location, total, tax, subtotal, item_count").eq("user_id", userId).order("receipt_date", { ascending: false });
-    if (intent.date_filter && !intent.broad) {
+    if (intent.date_filter) {
       const [year, month] = intent.date_filter.split("-").map(Number);
       const start = `${year}-${String(month).padStart(2, "0")}-01`;
       const endMonth = month === 12 ? 1 : month + 1;
       const endYear = month === 12 ? year + 1 : year;
       const end = `${endYear}-${String(endMonth).padStart(2, "0")}-01`;
       q = q.gte("receipt_date", start).lt("receipt_date", end);
+    } else {
+      q = q.gte("receipt_date", receiptCutoff);
     }
     fetches.push(fetchAllRows("receipts", q));
     keys.push("receipts");
   }
 
-  if (intent.needs_items || intent.broad) {
-    fetches.push(fetchAllRows("receipt_items", supabase.from("receipt_items").select("receipt_id, raw_name, qty, pack_size, line_total, unit_cost, is_personal, sku_id").eq("user_id", userId)));
-    keys.push("items");
-  }
-
-  if (intent.needs_machines || intent.broad) {
+  if (intent.needs_machines) {
     fetches.push(fetchAllRows("machines", supabase.from("machines").select("id, name, location").eq("user_id", userId)));
     keys.push("machines");
   }
 
-  if (intent.needs_sales || intent.broad) {
+  if (intent.needs_sales) {
     let q = supabase.from("machine_sales").select("machine_id, date, cash_amount, credit_amount").eq("user_id", userId).order("date", { ascending: false });
-    if (intent.date_filter && !intent.broad) {
+    if (intent.date_filter) {
       const [year, month] = intent.date_filter.split("-").map(Number);
       const start = `${year}-${String(month).padStart(2, "0")}-01`;
       const endMonth = month === 12 ? 1 : month + 1;
       const endYear = month === 12 ? year + 1 : year;
       const end = `${endYear}-${String(endMonth).padStart(2, "0")}-01`;
       q = q.gte("date", start).lt("date", end);
+    } else {
+      q = q.gte("date", salesCutoff);
     }
     fetches.push(fetchAllRows("machine_sales", q));
     keys.push("sales");
@@ -283,103 +218,40 @@ async function fetchSelectiveContext(supabase: any, userId: string, intent: Inte
     ctx.skus = ctx.skus.filter((s: any) => s.rebuy_status !== "Failed" && s.rebuy_status !== "Do Not Rebuy");
   }
 
+  // Fetch items separately — filter by receipt IDs we already fetched (time-bounded)
+  if (intent.needs_items) {
+    if (ctx.receipts.length > 0) {
+      const receiptIds = ctx.receipts.map((r: any) => r.id);
+      // Fetch items in batches of receipt IDs to avoid URL length limits
+      const batchSize = 100;
+      const allItems: any[] = [];
+      for (let i = 0; i < receiptIds.length; i += batchSize) {
+        const batch = receiptIds.slice(i, i + batchSize);
+        const items = await fetchAllRows("receipt_items",
+          supabase.from("receipt_items")
+            .select("receipt_id, raw_name, qty, pack_size, line_total, unit_cost, is_personal, sku_id")
+            .eq("user_id", userId)
+            .in("receipt_id", batch)
+        );
+        allItems.push(...items);
+      }
+      ctx.items = allItems;
+    } else {
+      ctx.items = [];
+    }
+  }
+
   return ctx;
 }
 
-// --- Data summarization (aggregated instead of raw rows) ---
-
-function summarizeForBroadQuery(ctx: any): any {
-  const summary: any = { ...ctx };
-
-  // Summarize receipts into monthly aggregates
-  if (ctx.receipts.length > 20) {
-    const monthly: Record<string, { count: number; total: number; vendors: Record<string, number> }> = {};
-    for (const r of ctx.receipts) {
-      const monthKey = r.receipt_date?.substring(0, 7) || "unknown";
-      if (!monthly[monthKey]) monthly[monthKey] = { count: 0, total: 0, vendors: {} };
-      monthly[monthKey].count++;
-      monthly[monthKey].total += Number(r.total) || 0;
-      const v = r.vendor || "unknown";
-      monthly[monthKey].vendors[v] = (monthly[monthKey].vendors[v] || 0) + 1;
-    }
-    summary.receiptSummary = Object.entries(monthly)
-      .sort(([a], [b]) => b.localeCompare(a))
-      .map(([month, d]) => {
-        const topVendors = Object.entries(d.vendors).sort(([,a],[,b]) => (b as number) - (a as number)).slice(0, 3).map(([v, c]) => `${v} (${c})`).join(", ");
-        return `${month}: ${d.count} receipts, $${d.total.toFixed(2)} total, vendors: ${topVendors}`;
-      });
-    summary.receipts = []; // Don't include raw receipts
-  }
-
-  // Summarize items into per-SKU aggregates
-  if (ctx.items.length > 30 && ctx.skus.length > 0) {
-    const skuMap: Record<string, any> = {};
-    for (const s of ctx.skus) skuMap[s.id] = s;
-
-    const receiptDateMap: Record<string, string> = {};
-    for (const r of ctx.receipts.length > 0 ? ctx.receipts : []) {
-      receiptDateMap[r.id] = r.receipt_date;
-    }
-
-    const agg: Record<string, { name: string; totalCost: number; totalUnits: number; purchases: number; lastDate: string }> = {};
-    for (const item of ctx.items) {
-      if (item.is_personal || !item.sku_id) continue;
-      const sku = skuMap[item.sku_id];
-      if (!sku) continue;
-      if (!agg[item.sku_id]) agg[item.sku_id] = { name: sku.sku_name, totalCost: 0, totalUnits: 0, purchases: 0, lastDate: "" };
-      const units = (item.qty || 1) * (item.pack_size || 1);
-      agg[item.sku_id].totalCost += Number(item.line_total) || 0;
-      agg[item.sku_id].totalUnits += units;
-      agg[item.sku_id].purchases++;
-      const date = receiptDateMap[item.receipt_id] || "";
-      if (date > agg[item.sku_id].lastDate) agg[item.sku_id].lastDate = date;
-    }
-
-    summary.itemSummary = Object.entries(agg).map(([skuId, d]) => {
-      const sku = skuMap[skuId];
-      const avgCost = d.totalUnits > 0 ? (d.totalCost / d.totalUnits).toFixed(2) : "?";
-      const sellPrice = sku?.sell_price ? Number(sku.sell_price).toFixed(2) : "?";
-      const profit = sku?.sell_price && d.totalUnits > 0 ? (Number(sku.sell_price) - d.totalCost / d.totalUnits).toFixed(2) : "?";
-      return `${d.name}: ${d.totalUnits} units across ${d.purchases} purchases, avg cost $${avgCost}/unit, sell $${sellPrice}, profit/unit $${profit}, last bought ${d.lastDate || "?"}`;
-    });
-    summary.items = []; // Don't include raw items
-  }
-
-  // Summarize sales into monthly aggregates per machine
-  if (ctx.sales.length > 20 && ctx.machines.length > 0) {
-    const machineMap: Record<string, string> = {};
-    for (const m of ctx.machines) machineMap[m.id] = m.name;
-
-    const agg: Record<string, Record<string, { cash: number; credit: number; count: number }>> = {};
-    for (const s of ctx.sales) {
-      const mName = machineMap[s.machine_id] || s.machine_id;
-      const monthKey = s.date?.substring(0, 7) || "unknown";
-      if (!agg[mName]) agg[mName] = {};
-      if (!agg[mName][monthKey]) agg[mName][monthKey] = { cash: 0, credit: 0, count: 0 };
-      agg[mName][monthKey].cash += Number(s.cash_amount) || 0;
-      agg[mName][monthKey].credit += Number(s.credit_amount) || 0;
-      agg[mName][monthKey].count++;
-    }
-
-    summary.salesSummary = Object.entries(agg).map(([machine, months]) => {
-      const lines = Object.entries(months).sort(([a], [b]) => b.localeCompare(a)).map(([month, d]) => {
-        const total = d.cash + d.credit;
-        return `  ${month}: $${total.toFixed(2)} (cash $${d.cash.toFixed(2)}, credit $${d.credit.toFixed(2)}), ${d.count} entries`;
-      }).join("\n");
-      return `${machine}:\n${lines}`;
-    });
-    summary.sales = []; // Don't include raw sales
-  }
-
-  return summary;
-}
-
-function buildSystemPrompt(ctx: any, intent: Intent): string {
+function buildSystemPrompt(ctx: any): string {
   const sections: string[] = [];
 
-  sections.push(`You are Chip, a friendly and knowledgeable AI assistant for VendingTrackr — a vending machine business management app. You have deep expertise in the vending industry including typical profit margins (30-50%), restocking patterns, seasonal trends, and what good vs bad performance looks like.`);
+  sections.push(`You are Chip, a friendly and knowledgeable AI assistant for VendingTrackr — a vending machine business management app. You have deep expertise in the vending industry including typical profit margins (30-50%), restocking patterns, seasonal trends, and what good vs bad performance looks like.
 
-  // SKUs — always compact, keep as-is
+Data shown is from the last 90 days for purchases and 6 months for machine revenue. If the user asks about older data, let them know you only have recent data available.`);
+
+  // SKUs
   if (ctx.skus.length > 0) {
     const skuSummary = ctx.skus.map((s: any) =>
       `- ${s.sku_name} | sell: $${s.sell_price ?? "?"} | status: ${s.rebuy_status} | cat: ${s.category ?? "?"} | personal: ${s.default_is_personal}`
@@ -387,11 +259,8 @@ function buildSystemPrompt(ctx: any, intent: Intent): string {
     sections.push(`## SKUs (${ctx.skus.length} active products)\n${skuSummary}\n\nNote: SKUs marked as Failed or Do Not Rebuy have been excluded. Do not recommend or analyze them — the user has already moved on from those products.`);
   }
 
-  // Items — use summary if available, else raw detail
-  if (ctx.itemSummary && ctx.itemSummary.length > 0) {
-    sections.push(`## SKU Purchase & Profit Summary\n${ctx.itemSummary.map((l: string) => `- ${l}`).join("\n")}`);
-  } else if (ctx.items.length > 0 && ctx.skus.length > 0) {
-    // Raw detail for narrow queries
+  // Items + SKU profit analysis
+  if (ctx.items.length > 0 && ctx.skus.length > 0) {
     const receiptDateMap: Record<string, string> = {};
     for (const r of ctx.receipts) receiptDateMap[r.id] = r.receipt_date;
 
@@ -425,21 +294,16 @@ function buildSystemPrompt(ctx: any, intent: Intent): string {
     sections.push(`## Purchase Detail (${ctx.items.length} line items)\n${purchaseDetail}`);
   }
 
-  // Receipts — use summary if available, else raw
-  if (ctx.receiptSummary && ctx.receiptSummary.length > 0) {
-    sections.push(`## Receipt Summary (${ctx.receiptSummary.length} months)\n${ctx.receiptSummary.map((l: string) => `- ${l}`).join("\n")}`);
-  } else if (ctx.receipts.length > 0) {
-    const receiptSummary = ctx.receipts.map((r: any) =>
+  // Receipts
+  if (ctx.receipts.length > 0) {
+    const receiptLines = ctx.receipts.map((r: any) =>
       `- ${r.receipt_date} | ${r.vendor} | ${r.store_location ?? "?"} | total: $${r.total ?? "?"} | items: ${r.item_count ?? "?"}`
     ).join("\n");
-    sections.push(`## Receipts (${ctx.receipts.length} total)\n${receiptSummary}`);
+    sections.push(`## Receipts (${ctx.receipts.length} total)\n${receiptLines}`);
   }
 
-  // Machines & Sales — use summary if available, else raw
-  if (ctx.salesSummary && ctx.salesSummary.length > 0) {
-    const machineInfo = ctx.machines.map((m: any) => `- ${m.name} (${m.location ?? "?"})`).join("\n");
-    sections.push(`## Machines\n${machineInfo}\n\n## Revenue Summary\n${ctx.salesSummary.join("\n\n")}`);
-  } else if (ctx.machines.length > 0) {
+  // Machines & Sales
+  if (ctx.machines.length > 0) {
     const machineSummary = ctx.machines.map((m: any) => {
       const mSales = ctx.sales.filter((s: any) => s.machine_id === m.id);
       const totalRev = mSales.reduce((sum: number, s: any) => sum + Number(s.cash_amount) + Number(s.credit_amount), 0);
@@ -556,32 +420,20 @@ serve(async (req) => {
 
     const { messages } = await req.json();
 
-    // Step 1: Get AI config + classify intent (regex first, AI fallback)
+    // Step 1: Detect intent via regex (no AI call) + get AI config
     const lastUserMsg = [...messages].reverse().find((m: any) => m.role === "user")?.content || "";
+    const intent = detectIntent(lastUserMsg);
 
-    const regexIntent = tryRegexIntent(lastUserMsg);
-    const [aiConfig, intent] = await Promise.all([
-      getAIConfig(supabase, user.id),
-      regexIntent ? Promise.resolve(regexIntent) : classifyIntent(lastUserMsg),
-    ]);
+    console.log("Intent detection (regex):", JSON.stringify(intent));
 
-    // Log intent classification if AI was used
-    if (!regexIntent) {
-      const intentInputChars = lastUserMsg.length + 500; // system prompt for classifier is ~500 chars
-      await logUsage(supabase, user.id, "chip_intent", "google/gemini-2.5-flash-lite", intentInputChars, 100);
-    }
+    const aiConfig = await getAIConfig(supabase, user.id);
 
-    console.log("Intent classification:", JSON.stringify(intent), regexIntent ? "(regex)" : "(AI)");
+    // Step 2: Fetch only the data Chip needs (time-bounded)
+    const ctx = await fetchSelectiveContext(supabase, user.id, intent);
 
-    // Step 2: Fetch only the data Chip needs
-    const rawCtx = await fetchSelectiveContext(supabase, user.id, intent);
+    const systemPrompt = buildSystemPrompt(ctx);
 
-    // Step 3: Summarize data for broad queries to reduce token usage
-    const ctx = intent.broad ? summarizeForBroadQuery(rawCtx) : rawCtx;
-
-    const systemPrompt = buildSystemPrompt(ctx, intent);
-
-    // Step 4: Trim conversation history to last 6 messages (3 exchanges)
+    // Step 3: Trim conversation history to last 6 messages (3 exchanges)
     const trimmedMessages = messages.length > 6 ? messages.slice(-6) : messages;
     const fullMessages = [{ role: "system", content: systemPrompt }, ...trimmedMessages];
 
