@@ -501,7 +501,11 @@ export type Database = {
     Enums: {
       parse_status_type: "PENDING" | "PARSED" | "PARTIAL_PARSE" | "FAILED"
       rebuy_status_type: "Rebuy" | "Test" | "Do Not Rebuy" | "Core" | "Failed"
-      receipt_type: "sams_scan_and_go" | "walmart_store" | "walmart_delivery"
+      receipt_type:
+        | "sams_scan_and_go"
+        | "walmart_store"
+        | "walmart_delivery"
+        | "csv_import"
       vendor_type: "sams" | "walmart" | "other"
     }
     CompositeTypes: {
@@ -632,7 +636,12 @@ export const Constants = {
     Enums: {
       parse_status_type: ["PENDING", "PARSED", "PARTIAL_PARSE", "FAILED"],
       rebuy_status_type: ["Rebuy", "Test", "Do Not Rebuy", "Core", "Failed"],
-      receipt_type: ["sams_scan_and_go", "walmart_store", "walmart_delivery"],
+      receipt_type: [
+        "sams_scan_and_go",
+        "walmart_store",
+        "walmart_delivery",
+        "csv_import",
+      ],
       vendor_type: ["sams", "walmart", "other"],
     },
   },
