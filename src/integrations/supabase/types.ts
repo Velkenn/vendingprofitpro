@@ -349,6 +349,36 @@ export type Database = {
         }
         Relationships: []
       }
+      restock_warnings_shown: {
+        Row: {
+          alert_key: string | null
+          created_at: string
+          feature_type: string
+          id: string
+          shown_date: string
+          sku_id: string | null
+          user_id: string
+        }
+        Insert: {
+          alert_key?: string | null
+          created_at?: string
+          feature_type?: string
+          id?: string
+          shown_date?: string
+          sku_id?: string | null
+          user_id: string
+        }
+        Update: {
+          alert_key?: string | null
+          created_at?: string
+          feature_type?: string
+          id?: string
+          shown_date?: string
+          sku_id?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       sku_aliases: {
         Row: {
           created_at: string
