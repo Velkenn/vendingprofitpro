@@ -1,78 +1,67 @@
 
 
-## CSV Import Feature for Receipts
+## Receipt Upload in Chip Chat
 
 ### Overview
-Add a CSV import flow that lets operators bulk-upload historical purchase data. Rows sharing the same Date+Store are grouped into single receipt records. Product names go through AI SKU normalization. A summary screen shows results after import.
+Add a file attachment button to Chip's chat input that lets users upload a receipt image/PDF directly in the conversation. The file goes through the existing `parse-receipt` edge function, and Chip responds with a conversational trip summary instead of a generic confirmation.
 
-### 1. Database Changes
+### Architecture
 
-**Migration**: Add `csv_import` to the `receipt_type` enum so imported receipts can be identified:
-```sql
-ALTER TYPE public.receipt_type ADD VALUE IF NOT EXISTS 'csv_import';
-```
+The flow is:
+1. User taps paperclip icon → picks image/PDF
+2. Frontend uploads file to `receipts` storage bucket, creates a `receipts` row (checking for duplicates first), calls `parse-receipt`
+3. Frontend polls for parse completion (reusing Receipts.tsx pattern)
+4. Once parsed, frontend fetches the receipt + items data and sends it to `chip-chat` as a special `receipt_summary` payload instead of a normal message
+5. Chip responds with a conversational trip summary using its existing formatting rules
 
-No new tables needed — imports create standard `receipts` + `receipt_items` rows.
+### Changes
 
-### 2. Edge Function: `import-csv`
+**Edit: `src/pages/Chat.tsx`**
 
-**Create: `supabase/functions/import-csv/index.ts`**
+- Import `Paperclip` from lucide-react
+- Add a hidden `<input type="file" accept="image/*,.pdf" capture="environment">` ref
+- Add state: `attachedFile`, `isUploading` (for the upload+parse flow)
+- Add paperclip button to the left of the text input in the form bar
+- On file select:
+  - Show a "Parsing receipt..." user message bubble (with a small spinner/loading indicator)
+  - Upload file to `receipts` storage bucket under `{userId}/{timestamp}_{filename}`
+  - **Duplicate check**: Before inserting, query `receipts` table — skip if existing receipt found with same `pdf_url` filename pattern (simple check)
+  - Create receipt row with `parse_status: 'PENDING'`, `vendor: 'sams'`, `receipt_date: today`
+  - Call `parse-receipt` edge function with `receipt_id` and `file_path`
+  - Poll receipt status every 2s until not `PENDING`
+  - If `FAILED`: add an inline assistant error message to chat ("I couldn't read that receipt. Try a clearer photo or PDF.")
+  - If `PARSED`/`PARTIAL_PARSE`:
+    - Fetch the parsed receipt data (store, date, total, item_count) and items (with SKU sell prices for profit calc)
+    - Build a summary object with: store name, date, total spend, item count, estimated profit, notable items
+    - Send to `chip-chat` with a special payload: `{ messages: [..., userMsg], receipt_context: { ... } }`
+    - Chip streams back a conversational summary
 
-Accepts `{ rows: [{date, store, product_name, units, total_cost, sell_price}], user_id }`.
+**Edit: `supabase/functions/chip-chat/index.ts`**
 
-For each valid row:
-- Parse date (supports M/D/YYYY, MM/DD/YYYY, MM/DD/YY, "Month D, YYYY", ISO 8601)
-- Calculate `unit_cost = total_cost / units`
-- Group rows by `date + store` → one receipt per group
+- In the main handler, check for `receipt_context` in the request body
+- If present, skip normal data fetching and instead build a receipt-specific system prompt:
+  - Include the parsed receipt details (store, date, items with costs/margins)
+  - Fetch the user's SKUs to calculate profit and find insights (highest margin item, price comparisons to previous purchases, overdue restocks)
+  - Instruct Chip to respond with a "trip summary" following existing format rules: bold lead insight, max 3 bullets with dollar figures, one actionable recommendation
+- The receipt_context includes: `receipt_id`, `store_name`, `receipt_date`, `total`, `item_count`, `items: [{name, qty, line_total, unit_cost, sell_price, pack_size}]`
+- Chip's prompt should instruct: mention store + date, total spend, items parsed, estimated profit, and one insight (highest margin item, price comparison, or restock flag)
 
-For each receipt group:
-- Insert into `receipts` with `vendor: 'other'`, `receipt_type: 'csv_import'`, `parse_status: 'PARSED'`
-- Collect all product names, run through the existing `normalizeNamesWithAI()` + `fuzzyMatchSku()` logic (reused from parse-receipt)
-- Match/create SKUs exactly as parse-receipt does (aliases → reviewed items → normalized name match → auto-create)
-- If a `sell_price` is provided and a new SKU is created, set `sell_price` on the SKU
-- Insert `receipt_items` with `needs_review: true` for new SKUs, `false` for matched ones
+**Duplicate Prevention**
+- Before creating the receipt row, check for an existing receipt with matching `store_location` + `receipt_date` + `total` for the same user
+- If found, show an inline chat message: "This receipt appears to already be uploaded" and don't create a duplicate
+- This check happens after parsing completes (since we don't know store/date/total until then), so do the check in the edge function and return a `duplicate: true` flag, OR do it client-side after polling shows parsed data
 
-Skip rows with missing Date, Product Name, or Total Cost — collect `{row, reason}` for each skip.
+Actually, cleaner approach: do the duplicate check **after** parsing succeeds, client-side. Fetch the just-parsed receipt, check if another receipt exists with same vendor + receipt_date + total (excluding the one just created). If duplicate found, delete the just-created receipt and items, show error in chat.
 
-Return: `{ receipts_created, skus_created, skus_flagged_review, skipped: [{row, reason}] }`
+### Technical Details
 
-### 3. Frontend: CSV Import UI
-
-**Edit: `src/pages/Receipts.tsx`**
-
-- Add "Import CSV" button next to existing "Upload" button in the header
-- Add a hidden `<input type="file" accept=".csv">` ref
-- Add state for CSV import flow: `csvImporting`, `csvResults`, `csvError`
-
-**Import flow states:**
-1. **Idle** — button visible
-2. **Processing** — show spinner + "Importing X rows..."
-3. **Done** — summary card showing:
-   - Receipts created count
-   - SKUs created count  
-   - SKUs flagged for review count
-   - Skipped rows list (row number + reason)
-4. **Error** — error message + retry
-
-**CSV parsing**: Use client-side parsing (split by newlines, split by comma with basic quote handling). Validate headers match expected columns. Send parsed rows to the edge function.
-
-**Template download**: Add a "Download Template" link that generates and downloads a CSV file with headers `Date,Store,Product Name,Units,Total Cost,Sell Price` and one example row: `01/15/2025,Sam's Club,Monster Energy Zero Ultra 12pk,2,36.96,2.00`.
-
-### 4. "Imported" Badge on Receipt Cards
-
-**Edit: `src/pages/Receipts.tsx`** and **`src/pages/ReceiptDetail.tsx`**
-
-- Check `receipt.receipt_type === 'csv_import'` 
-- Show a small `<Badge>Imported</Badge>` next to the store name on the receipt card
-- Also show on the receipt detail page header
-
-### 5. Receipt Status for Imports
-
-Since imported receipts use `parse_status: 'PARSED'`, they'll show the standard "Parsed" badge. The `receipt_type: 'csv_import'` field distinguishes them without affecting any existing logic in Stats, Chip, or SKU history.
+- File attachment uses the same upload pattern as `Receipts.tsx` (storage upload → receipt row → invoke parse-receipt → poll)
+- The receipt summary prompt is injected as additional context in chip-chat, not a separate edge function
+- Profit calculation: for each item, if SKU has `sell_price`, profit = `sell_price * qty * pack_size - line_total`
+- Price comparison: fetch previous purchases of same SKUs from `receipt_items` to compare unit costs
+- Restock check: reuse the same logic from `computeRestockWarnings` to flag overdue items
 
 ### Files changed
-- **Migration**: Add `csv_import` to `receipt_type` enum
-- **Create**: `supabase/functions/import-csv/index.ts` — CSV processing, SKU matching, receipt creation
-- **Edit**: `src/pages/Receipts.tsx` — add Import CSV button, template download, processing UI, summary screen, "Imported" badge on cards
-- **Edit**: `src/pages/ReceiptDetail.tsx` — show "Imported" badge on detail view
+- **Edit**: `src/pages/Chat.tsx` — add paperclip button, file upload flow, receipt parsing, summary request
+- **Edit**: `supabase/functions/chip-chat/index.ts` — handle `receipt_context` payload, build trip summary prompt
 
