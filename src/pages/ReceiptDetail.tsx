@@ -104,6 +104,9 @@ export default function ReceiptDetail() {
               </CardTitle>
             )}
             <div className="flex items-center gap-2">
+              {receipt.receipt_type === "csv_import" && (
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0">Imported</Badge>
+              )}
               <Badge variant="secondary" className={`text-xs gap-1 ${status.badgeClass}`}>
                 <StatusIcon className={`h-3 w-3 ${status.animate ? "animate-spin" : ""}`} />
                 {status.label}
