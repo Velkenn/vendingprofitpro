@@ -677,27 +677,125 @@ serve(async (req) => {
       });
     }
 
-    const { messages } = await req.json();
+    const { messages, receipt_context } = await req.json();
 
-    const lastUserMsg = [...messages].reverse().find((m: any) => m.role === "user")?.content || "";
-    const intent = detectIntent(lastUserMsg);
+    let systemPrompt: string;
+    let aiConfig: AIConfig;
 
-    console.log("Intent detection (regex):", JSON.stringify(intent));
+    if (receipt_context) {
+      // --- Receipt summary mode: skip normal data fetching ---
+      aiConfig = await getAIConfig(supabase, user.id);
 
-    const [aiConfig, ctx] = await Promise.all([
-      getAIConfig(supabase, user.id),
-      fetchSelectiveContext(supabase, user.id, intent),
-    ]);
+      // Fetch previous purchases for price comparison
+      const skuIds = (receipt_context.items || [])
+        .filter((i: any) => i.sku_id)
+        .map((i: any) => i.sku_id);
 
-    // Compute anomalies (always, but only shows on first message of day)
-    const anomalyText = await computeAnomalies(supabase, user.id, ctx.machines, ctx.sales, ctx.receipts);
+      let priceComparisons = "";
+      if (skuIds.length > 0) {
+        const { data: prevItems } = await supabase
+          .from("receipt_items")
+          .select("sku_id, unit_cost, receipt_id, receipts!inner(receipt_date, store_location, vendor)")
+          .in("sku_id", skuIds)
+          .neq("receipt_id", receipt_context.receipt_id)
+          .order("created_at", { ascending: false })
+          .limit(200);
 
-    // Compute restock warnings only when intent asks for it
-    const restockText = intent.needs_restock
-      ? await computeRestockWarnings(supabase, user.id, ctx.skus, ctx.items, ctx.receipts)
-      : "";
+        if (prevItems && prevItems.length > 0) {
+          const skuPrev: Record<string, { store: string; unit_cost: number; date: string }[]> = {};
+          for (const pi of prevItems) {
+            if (!pi.unit_cost || !pi.receipts) continue;
+            const r = pi.receipts as any;
+            if (!skuPrev[pi.sku_id]) skuPrev[pi.sku_id] = [];
+            skuPrev[pi.sku_id].push({
+              store: `${r.vendor} - ${r.store_location || "?"}`,
+              unit_cost: Number(pi.unit_cost),
+              date: r.receipt_date,
+            });
+          }
+          const lines: string[] = [];
+          for (const [sid, history] of Object.entries(skuPrev)) {
+            const item = receipt_context.items.find((i: any) => i.sku_id === sid);
+            if (!item) continue;
+            const prev = history[0];
+            lines.push(`- ${item.name}: previously $${prev.unit_cost.toFixed(2)}/unit at ${prev.store} (${prev.date}), now $${item.unit_cost?.toFixed(2) ?? "?"}/unit`);
+          }
+          if (lines.length > 0) priceComparisons = "\n## Price Comparisons\n" + lines.join("\n");
+        }
+      }
 
-    const systemPrompt = buildSystemPrompt(ctx, anomalyText, restockText);
+      // Check for overdue restocks among items on this receipt
+      let restockFlags = "";
+      if (skuIds.length > 0) {
+        const { data: skuData } = await supabase
+          .from("skus")
+          .select("id, sku_name, sell_price, rebuy_status")
+          .in("id", skuIds)
+          .not("rebuy_status", "in", '("Failed","Do Not Rebuy")');
+
+        // We don't need full restock calc here — just note if any items exist
+        if (skuData) {
+          restockFlags = ""; // Chip will infer from the data
+        }
+      }
+
+      // Build items detail
+      const itemLines = (receipt_context.items || []).map((i: any) => {
+        const units = (i.qty || 1) * (i.pack_size || 1);
+        const profit = i.sell_price && i.unit_cost
+          ? ((i.sell_price * units) - i.line_total).toFixed(2)
+          : "?";
+        return `- ${i.name}: qty ${i.qty}, pack ${i.pack_size || 1}, ${units} units, cost $${Number(i.line_total).toFixed(2)}, unit cost $${i.unit_cost?.toFixed(2) ?? "?"}, sell $${i.sell_price ?? "?"}, est profit $${profit}`;
+      }).join("\n");
+
+      const totalProfit = (receipt_context.items || []).reduce((sum: number, i: any) => {
+        if (!i.sell_price || !i.unit_cost) return sum;
+        const units = (i.qty || 1) * (i.pack_size || 1);
+        return sum + (i.sell_price * units - Number(i.line_total));
+      }, 0);
+
+      systemPrompt = `You are Chip, a friendly vending business assistant for VendingTrackr.
+
+The user just uploaded a receipt. Provide a conversational "trip summary."
+
+## Receipt Details
+- Store: ${receipt_context.store_name || "Unknown"}
+- Date: ${receipt_context.receipt_date || "Unknown"}
+- Total: $${receipt_context.total ?? "?"}
+- Items parsed: ${receipt_context.item_count || receipt_context.items?.length || 0}
+- Estimated total profit: $${totalProfit.toFixed(2)}
+
+## Items
+${itemLines}
+${priceComparisons}
+
+## Response Format (STRICT)
+1. Lead with ONE bold sentence about the trip (e.g. estimated profit, total spend).
+2. Max 3 bullets with specific dollar figures — highlight: highest margin item, any price changes from previous purchases, or a notable find.
+3. End with one "→" recommendation.
+4. Under 100 words. Fits one phone screen.
+5. Today's date is ${new Date().toISOString().split("T")[0]}.`;
+
+    } else {
+      // --- Normal chat mode ---
+      const lastUserMsg = [...messages].reverse().find((m: any) => m.role === "user")?.content || "";
+      const intent = detectIntent(lastUserMsg);
+
+      console.log("Intent detection (regex):", JSON.stringify(intent));
+
+      const [config, ctx] = await Promise.all([
+        getAIConfig(supabase, user.id),
+        fetchSelectiveContext(supabase, user.id, intent),
+      ]);
+      aiConfig = config;
+
+      const anomalyText = await computeAnomalies(supabase, user.id, ctx.machines, ctx.sales, ctx.receipts);
+      const restockText = intent.needs_restock
+        ? await computeRestockWarnings(supabase, user.id, ctx.skus, ctx.items, ctx.receipts)
+        : "";
+
+      systemPrompt = buildSystemPrompt(ctx, anomalyText, restockText);
+    }
 
     // Trim conversation history to last 6 messages
     const trimmedMessages = messages.length > 6 ? messages.slice(-6) : messages;
