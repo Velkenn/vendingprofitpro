@@ -46,6 +46,7 @@ interface Intent {
   needs_items: boolean;
   needs_machines: boolean;
   needs_sales: boolean;
+  needs_restock: boolean;
   date_filter: string | null;
 }
 
@@ -90,7 +91,7 @@ async function getAIConfig(supabase: any, userId: string): Promise<AIConfig> {
   throw new Error("No AI provider configured. Please set one up in Settings → AI Settings.");
 }
 
-// --- Regex-based intent shortcutting ---
+// --- Regex-based intent detection ---
 const MONTH_NAMES: Record<string, string> = {
   january: "01", february: "02", march: "03", april: "04",
   may: "05", june: "06", july: "07", august: "08",
@@ -102,7 +103,6 @@ const MONTH_NAMES: Record<string, string> = {
 function detectIntent(question: string): Intent {
   const q = question.toLowerCase();
 
-  // Extract date filter if present
   let date_filter: string | null = null;
   const monthYearMatch = q.match(/\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)\s+(\d{4})\b/);
   if (monthYearMatch) {
@@ -113,34 +113,30 @@ function detectIntent(question: string): Intent {
     date_filter = `${isoMatch[1]}-${isoMatch[2]}`;
   }
 
-  const defaultAll: Intent = { needs_skus: true, needs_receipts: true, needs_items: true, needs_machines: true, needs_sales: true, date_filter };
+  const needs_restock = /\b(restock|inventory|run out|running low|what.*(do|need).*this week|needs? attention|supply|stock up)\b/.test(q);
 
-  // Broad/overview questions
+  const defaultAll: Intent = { needs_skus: true, needs_receipts: true, needs_items: true, needs_machines: true, needs_sales: true, needs_restock, date_filter };
+
   if (/\b(overview|summary|how.?s my business|full analysis|everything|dashboard|report)\b/.test(q)) {
     return defaultAll;
   }
 
-  // Machine/revenue questions
   if (/\b(machine|revenue|vending|cash|credit|collection)\b/.test(q) && !/\b(sku|product|item|bought|purchase|receipt|cost|store)\b/.test(q)) {
-    return { needs_skus: false, needs_receipts: false, needs_items: false, needs_machines: true, needs_sales: true, date_filter };
+    return { needs_skus: false, needs_receipts: false, needs_items: false, needs_machines: true, needs_sales: true, needs_restock, date_filter };
   }
 
-  // SKU/product/profit questions
   if (/\b(sku|product|profit|margin|sell price|best seller|worst seller|rebuy)\b/.test(q) && !/\b(machine|revenue|collection)\b/.test(q)) {
-    return { needs_skus: true, needs_receipts: true, needs_items: true, needs_machines: false, needs_sales: false, date_filter };
+    return { needs_skus: true, needs_receipts: true, needs_items: true, needs_machines: false, needs_sales: false, needs_restock, date_filter };
   }
 
-  // Purchase/receipt/store questions
   if (/\b(receipt|purchase|bought|spend|spent|store|vendor|sam|walmart|costco)\b/.test(q) && !/\b(machine|revenue)\b/.test(q)) {
-    return { needs_skus: true, needs_receipts: true, needs_items: true, needs_machines: false, needs_sales: false, date_filter };
+    return { needs_skus: true, needs_receipts: true, needs_items: true, needs_machines: false, needs_sales: false, needs_restock, date_filter };
   }
 
-  // Restock/inventory questions
-  if (/\b(restock|inventory|run out|running low|what.*(do|need).*this week|needs? attention|supply|stock up)\b/.test(q)) {
-    return { needs_skus: true, needs_receipts: true, needs_items: true, needs_machines: false, needs_sales: false, date_filter };
+  if (needs_restock) {
+    return { needs_skus: true, needs_receipts: true, needs_items: true, needs_machines: false, needs_sales: false, needs_restock, date_filter };
   }
 
-  // Default: fetch everything
   return defaultAll;
 }
 
@@ -186,26 +182,23 @@ async function fetchSelectiveContext(supabase: any, userId: string, intent: Inte
     keys.push("receipts");
   }
 
-  if (intent.needs_machines) {
-    fetches.push(fetchAllRows("machines", supabase.from("machines").select("id, name, location").eq("user_id", userId)));
-    keys.push("machines");
-  }
+  // Always fetch machines + sales for anomaly detection
+  fetches.push(fetchAllRows("machines", supabase.from("machines").select("id, name, location").eq("user_id", userId)));
+  keys.push("machines");
 
-  if (intent.needs_sales) {
-    let q = supabase.from("machine_sales").select("machine_id, date, cash_amount, credit_amount").eq("user_id", userId).order("date", { ascending: false });
-    if (intent.date_filter) {
-      const [year, month] = intent.date_filter.split("-").map(Number);
-      const start = `${year}-${String(month).padStart(2, "0")}-01`;
-      const endMonth = month === 12 ? 1 : month + 1;
-      const endYear = month === 12 ? year + 1 : year;
-      const end = `${endYear}-${String(endMonth).padStart(2, "0")}-01`;
-      q = q.gte("date", start).lt("date", end);
-    } else {
-      q = q.gte("date", salesCutoff);
-    }
-    fetches.push(fetchAllRows("machine_sales", q));
-    keys.push("sales");
+  let salesQ = supabase.from("machine_sales").select("machine_id, date, cash_amount, credit_amount").eq("user_id", userId).order("date", { ascending: false });
+  if (intent.date_filter && intent.needs_sales) {
+    const [year, month] = intent.date_filter.split("-").map(Number);
+    const start = `${year}-${String(month).padStart(2, "0")}-01`;
+    const endMonth = month === 12 ? 1 : month + 1;
+    const endYear = month === 12 ? year + 1 : year;
+    const end = `${endYear}-${String(endMonth).padStart(2, "0")}-01`;
+    salesQ = salesQ.gte("date", start).lt("date", end);
+  } else {
+    salesQ = salesQ.gte("date", salesCutoff);
   }
+  fetches.push(fetchAllRows("machine_sales", salesQ));
+  keys.push("sales");
 
   const results = await Promise.all(fetches);
   const ctx: any = { skus: [], receipts: [], items: [], machines: [], sales: [], memories: [] };
@@ -218,11 +211,10 @@ async function fetchSelectiveContext(supabase: any, userId: string, intent: Inte
     ctx.skus = ctx.skus.filter((s: any) => s.rebuy_status !== "Failed" && s.rebuy_status !== "Do Not Rebuy");
   }
 
-  // Fetch items separately — filter by receipt IDs we already fetched (time-bounded)
+  // Fetch items separately — filter by receipt IDs we already fetched
   if (intent.needs_items) {
     if (ctx.receipts.length > 0) {
       const receiptIds = ctx.receipts.map((r: any) => r.id);
-      // Fetch items in batches of receipt IDs to avoid URL length limits
       const batchSize = 100;
       const allItems: any[] = [];
       for (let i = 0; i < receiptIds.length; i += batchSize) {
@@ -244,7 +236,264 @@ async function fetchSelectiveContext(supabase: any, userId: string, intent: Inte
   return ctx;
 }
 
-function buildSystemPrompt(ctx: any): string {
+// --- Anomaly Detection ---
+async function computeAnomalies(supabase: any, userId: string, machines: any[], sales: any[], receipts: any[]): Promise<string> {
+  const today = new Date().toISOString().split("T")[0];
+
+  // Check which anomalies were already shown today
+  const { data: shownToday } = await supabase
+    .from("restock_warnings_shown")
+    .select("alert_key")
+    .eq("user_id", userId)
+    .eq("feature_type", "anomaly")
+    .eq("shown_date", today);
+
+  const alreadyShown = new Set((shownToday || []).map((r: any) => r.alert_key));
+
+  // If any anomaly was shown today, skip all anomaly detection
+  if (alreadyShown.size > 0) return "";
+
+  const alerts: string[] = [];
+  const newAlertKeys: string[] = [];
+  const now = new Date();
+
+  // --- Check no receipt in 10+ days ---
+  if (receipts.length > 0) {
+    const maxReceiptDate = receipts.reduce((max: string, r: any) => r.receipt_date > max ? r.receipt_date : max, receipts[0].receipt_date);
+    const daysSinceReceipt = Math.floor((now.getTime() - new Date(maxReceiptDate).getTime()) / (1000 * 60 * 60 * 24));
+    if (daysSinceReceipt >= 10 && !alreadyShown.has("no_receipt")) {
+      alerts.push(`⚠️ No new receipt uploaded in ${daysSinceReceipt} days (last: ${maxReceiptDate})`);
+      newAlertKeys.push("no_receipt");
+    }
+  }
+
+  // --- Machine revenue anomalies ---
+  // Group sales by week and machine
+  const weekOf = (dateStr: string) => {
+    const d = new Date(dateStr);
+    const day = d.getDay();
+    const diff = d.getDate() - day;
+    const sunday = new Date(d);
+    sunday.setDate(diff);
+    return sunday.toISOString().split("T")[0];
+  };
+
+  // Per-machine weekly revenue
+  for (const machine of machines) {
+    const mSales = sales.filter((s: any) => s.machine_id === machine.id);
+    if (mSales.length === 0) {
+      // Check if machine has had no revenue in 10+ days
+      const alertKey = `machine_idle_${machine.id}`;
+      if (!alreadyShown.has(alertKey)) {
+        alerts.push(`⚠️ ${machine.name} has no revenue logged in the last 6 months`);
+        newAlertKeys.push(alertKey);
+      }
+      continue;
+    }
+
+    // Check last sale date
+    const maxSaleDate = mSales.reduce((max: string, s: any) => s.date > max ? s.date : max, mSales[0].date);
+    const daysSinceSale = Math.floor((now.getTime() - new Date(maxSaleDate).getTime()) / (1000 * 60 * 60 * 24));
+    if (daysSinceSale >= 10) {
+      const alertKey = `machine_idle_${machine.id}`;
+      if (!alreadyShown.has(alertKey)) {
+        alerts.push(`⚠️ ${machine.name} has had no revenue in ${daysSinceSale} days (last: ${maxSaleDate})`);
+        newAlertKeys.push(alertKey);
+      }
+    }
+
+    // 4-week rolling average
+    const weeklyRev: Record<string, number> = {};
+    for (const s of mSales) {
+      const w = weekOf(s.date);
+      weeklyRev[w] = (weeklyRev[w] || 0) + Number(s.cash_amount) + Number(s.credit_amount);
+    }
+    const weeks = Object.keys(weeklyRev).sort().reverse();
+    if (weeks.length >= 5) {
+      const currentWeekRev = weeklyRev[weeks[0]] || 0;
+      const avgPrior4 = weeks.slice(1, 5).reduce((s, w) => s + (weeklyRev[w] || 0), 0) / 4;
+      if (avgPrior4 > 0) {
+        const pctChange = (currentWeekRev - avgPrior4) / avgPrior4;
+        const alertKey = `machine_rev_${machine.id}`;
+        if (Math.abs(pctChange) >= 0.2 && !alreadyShown.has(alertKey)) {
+          const emoji = pctChange > 0 ? "📈" : "⚠️";
+          const dir = pctChange > 0 ? "up" : "down";
+          alerts.push(`${emoji} ${machine.name} revenue is ${dir} ${Math.abs(Math.round(pctChange * 100))}% vs 4-week avg ($${currentWeekRev.toFixed(0)} vs $${avgPrior4.toFixed(0)})`);
+          newAlertKeys.push(alertKey);
+        }
+      }
+    }
+  }
+
+  // --- Overall revenue anomaly ---
+  if (sales.length > 0) {
+    const weeklyTotal: Record<string, number> = {};
+    for (const s of sales) {
+      const w = weekOf(s.date);
+      weeklyTotal[w] = (weeklyTotal[w] || 0) + Number(s.cash_amount) + Number(s.credit_amount);
+    }
+    const weeks = Object.keys(weeklyTotal).sort().reverse();
+    if (weeks.length >= 5) {
+      const current = weeklyTotal[weeks[0]] || 0;
+      const avg4 = weeks.slice(1, 5).reduce((s, w) => s + (weeklyTotal[w] || 0), 0) / 4;
+      if (avg4 > 0) {
+        const pct = (current - avg4) / avg4;
+        if (Math.abs(pct) >= 0.2 && !alreadyShown.has("overall_revenue")) {
+          const emoji = pct > 0 ? "📈" : "⚠️";
+          const dir = pct > 0 ? "up" : "down";
+          alerts.push(`${emoji} Total revenue ${dir} ${Math.abs(Math.round(pct * 100))}% vs 4-week avg ($${current.toFixed(0)} vs $${avg4.toFixed(0)})`);
+          newAlertKeys.push("overall_revenue");
+        }
+      }
+    }
+  }
+
+  // Log shown anomalies
+  if (newAlertKeys.length > 0) {
+    const rows = newAlertKeys.map(key => ({
+      user_id: userId,
+      feature_type: "anomaly",
+      alert_key: key,
+      shown_date: today,
+    }));
+    await supabase.from("restock_warnings_shown").insert(rows);
+  }
+
+  return alerts.join("\n");
+}
+
+// --- Store-Aware Restock Warnings ---
+async function computeRestockWarnings(supabase: any, userId: string, skus: any[], items: any[], receipts: any[]): Promise<string> {
+  const today = new Date();
+  const todayStr = today.toISOString().split("T")[0];
+
+  // Check already shown today
+  const { data: shownToday } = await supabase
+    .from("restock_warnings_shown")
+    .select("sku_id")
+    .eq("user_id", userId)
+    .eq("feature_type", "restock")
+    .eq("shown_date", todayStr);
+
+  const alreadyShownSkus = new Set((shownToday || []).map((r: any) => r.sku_id));
+
+  // Build receipt date + vendor + location map
+  const receiptMap: Record<string, { date: string; vendor: string; location: string }> = {};
+  for (const r of receipts) {
+    receiptMap[r.id] = { date: r.receipt_date, vendor: r.vendor, location: r.store_location || "Unknown" };
+  }
+
+  // Group items by SKU
+  const skuItems: Record<string, { dates: string[]; storeHistory: { vendor: string; location: string; date: string; unitCost: number }[] }> = {};
+  
+  const activeSkuIds = new Set(skus.map((s: any) => s.id));
+
+  for (const item of items) {
+    if (item.is_personal || !item.sku_id || !activeSkuIds.has(item.sku_id)) continue;
+    if (alreadyShownSkus.has(item.sku_id)) continue;
+
+    const receipt = receiptMap[item.receipt_id];
+    if (!receipt) continue;
+
+    if (!skuItems[item.sku_id]) {
+      skuItems[item.sku_id] = { dates: [], storeHistory: [] };
+    }
+
+    skuItems[item.sku_id].dates.push(receipt.date);
+
+    const units = (item.qty || 1) * (item.pack_size || 1);
+    const unitCost = units > 0 ? Number(item.line_total) / units : 0;
+    skuItems[item.sku_id].storeHistory.push({
+      vendor: receipt.vendor,
+      location: receipt.location,
+      date: receipt.date,
+      unitCost,
+    });
+  }
+
+  // Compute warnings
+  const warnings: { skuId: string; name: string; lastDate: string; avgInterval: number; predictedDate: Date; storeLine: string }[] = [];
+
+  for (const [skuId, data] of Object.entries(skuItems)) {
+    const uniqueDates = [...new Set(data.dates)].sort();
+    if (uniqueDates.length < 2) continue;
+
+    // Average interval between purchases
+    let totalDays = 0;
+    for (let i = 1; i < uniqueDates.length; i++) {
+      totalDays += (new Date(uniqueDates[i]).getTime() - new Date(uniqueDates[i - 1]).getTime()) / (1000 * 60 * 60 * 24);
+    }
+    const avgInterval = totalDays / (uniqueDates.length - 1);
+    const lastDate = uniqueDates[uniqueDates.length - 1];
+    const predictedDate = new Date(new Date(lastDate).getTime() + avgInterval * 24 * 60 * 60 * 1000);
+
+    // Only warn if predicted restock within 7 days
+    const daysUntilRestock = (predictedDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
+    if (daysUntilRestock > 7) continue;
+
+    const sku = skus.find((s: any) => s.id === skuId);
+    if (!sku) continue;
+
+    // Find best store by most recent unit cost per store
+    const storeLatest: Record<string, { date: string; unitCost: number }> = {};
+    for (const sh of data.storeHistory) {
+      const storeKey = `${sh.vendor}|${sh.location}`;
+      if (!storeLatest[storeKey] || sh.date > storeLatest[storeKey].date) {
+        storeLatest[storeKey] = { date: sh.date, unitCost: sh.unitCost };
+      }
+    }
+
+    const stores = Object.entries(storeLatest).map(([key, val]) => ({
+      store: key.replace("|", " - "),
+      ...val,
+    }));
+    stores.sort((a, b) => a.unitCost - b.unitCost);
+
+    const best = stores[0];
+    let storeLine = `Best: ${best.store} ($${best.unitCost.toFixed(2)}/unit)`;
+
+    // Check if last purchase was at a more expensive store
+    const lastPurchaseStore = data.storeHistory.sort((a, b) => b.date.localeCompare(a.date))[0];
+    const lastStoreKey = `${lastPurchaseStore.vendor} - ${lastPurchaseStore.location}`;
+    if (stores.length > 1 && lastStoreKey !== best.store && lastPurchaseStore.unitCost > best.unitCost) {
+      const savings = (lastPurchaseStore.unitCost - best.unitCost).toFixed(2);
+      storeLine += ` (save $${savings}/unit vs ${lastStoreKey})`;
+    }
+
+    warnings.push({
+      skuId,
+      name: sku.sku_name,
+      lastDate,
+      avgInterval: Math.round(avgInterval),
+      predictedDate,
+      storeLine,
+    });
+  }
+
+  // Sort by most urgent, limit to 3
+  warnings.sort((a, b) => a.predictedDate.getTime() - b.predictedDate.getTime());
+  const top3 = warnings.slice(0, 3);
+
+  if (top3.length === 0) return "";
+
+  // Log shown warnings
+  const rows = top3.map(w => ({
+    user_id: userId,
+    feature_type: "restock",
+    sku_id: w.skuId,
+    shown_date: todayStr,
+  }));
+  await supabase.from("restock_warnings_shown").insert(rows);
+
+  return top3.map(w => {
+    const predStr = w.predictedDate.toISOString().split("T")[0];
+    const overdue = w.predictedDate <= today;
+    const urgency = overdue ? "⚠️ OVERDUE" : `due ${predStr}`;
+    return `- ${w.name}: last bought ${w.lastDate}, avg every ${w.avgInterval} days, ${urgency}. ${w.storeLine}`;
+  }).join("\n");
+}
+
+function buildSystemPrompt(ctx: any, anomalyText: string, restockText: string): string {
   const sections: string[] = [];
 
   sections.push(`You are Chip, a friendly and knowledgeable AI assistant for VendingTrackr — a vending machine business management app. You have deep expertise in the vending industry including typical profit margins (30-50%), restocking patterns, seasonal trends, and what good vs bad performance looks like.
@@ -321,6 +570,16 @@ Data shown is from the last 90 days for purchases and 6 months for machine reven
     ? ctx.memories.map((m: any) => `- ${m.memory_text}`).join("\n")
     : "No saved memories yet.";
   sections.push(`## Chip's Saved Memories\n${memorySummary}`);
+
+  // Anomaly alerts
+  if (anomalyText) {
+    sections.push(`## Anomaly Alerts (append after your answer)\n${anomalyText}\nAppend these alerts AFTER your main answer, separated by a blank line. Present them exactly as shown.`);
+  }
+
+  // Restock predictions
+  if (restockText) {
+    sections.push(`## Restock Predictions\n${restockText}\nLead with the most urgent restock warning. Include all details shown: product name, dates, interval, store recommendation, and price.`);
+  }
 
   sections.push(`## Response Format (STRICT — follow exactly)
 1. Lead with ONE bold sentence: the single most important insight or answer.
@@ -420,24 +679,30 @@ serve(async (req) => {
 
     const { messages } = await req.json();
 
-    // Step 1: Detect intent via regex (no AI call) + get AI config
     const lastUserMsg = [...messages].reverse().find((m: any) => m.role === "user")?.content || "";
     const intent = detectIntent(lastUserMsg);
 
     console.log("Intent detection (regex):", JSON.stringify(intent));
 
-    const aiConfig = await getAIConfig(supabase, user.id);
+    const [aiConfig, ctx] = await Promise.all([
+      getAIConfig(supabase, user.id),
+      fetchSelectiveContext(supabase, user.id, intent),
+    ]);
 
-    // Step 2: Fetch only the data Chip needs (time-bounded)
-    const ctx = await fetchSelectiveContext(supabase, user.id, intent);
+    // Compute anomalies (always, but only shows on first message of day)
+    const anomalyText = await computeAnomalies(supabase, user.id, ctx.machines, ctx.sales, ctx.receipts);
 
-    const systemPrompt = buildSystemPrompt(ctx);
+    // Compute restock warnings only when intent asks for it
+    const restockText = intent.needs_restock
+      ? await computeRestockWarnings(supabase, user.id, ctx.skus, ctx.items, ctx.receipts)
+      : "";
 
-    // Step 3: Trim conversation history to last 6 messages (3 exchanges)
+    const systemPrompt = buildSystemPrompt(ctx, anomalyText, restockText);
+
+    // Trim conversation history to last 6 messages
     const trimmedMessages = messages.length > 6 ? messages.slice(-6) : messages;
     const fullMessages = [{ role: "system", content: systemPrompt }, ...trimmedMessages];
 
-    // Calculate input chars for usage logging
     const inputChars = fullMessages.reduce((sum: number, m: any) => sum + (m.content?.length || 0), 0);
 
     let streamRes: Response;
@@ -454,7 +719,6 @@ serve(async (req) => {
       throw new Error("Unsupported provider");
     }
 
-    // Helper to wrap a stream and log usage when done
     const wrapStreamWithLogging = (originalStream: ReadableStream<Uint8Array>, transformFn?: (line: string, controller: ReadableStreamDefaultController) => string | null) => {
       const reader = originalStream.getReader();
       const decoder = new TextDecoder();
@@ -518,7 +782,6 @@ serve(async (req) => {
       return new Response(stream, { headers: { ...corsHeaders, "Content-Type": "text/event-stream" } });
     }
 
-    // Lovable/OpenAI — pass through but track output
     const stream = wrapStreamWithLogging(streamRes.body!);
     return new Response(stream, {
       headers: { ...corsHeaders, "Content-Type": "text/event-stream" },
