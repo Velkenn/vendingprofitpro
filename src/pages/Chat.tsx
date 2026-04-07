@@ -6,12 +6,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Bot, ChevronDown, ChevronUp, Send, Bookmark, Trash2, Sparkles, Copy, Check } from "lucide-react";
+import { Bot, ChevronDown, ChevronUp, Send, Bookmark, Trash2, Sparkles, Copy, Check, Paperclip, Loader2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
+  isUploading?: boolean;
 }
 
 interface Memory {
@@ -38,7 +39,9 @@ export default function Chat() {
   const [memories, setMemories] = useState<Memory[]>([]);
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const copyToClipboard = (msgIndex: number) => {
     const msg = messages[msgIndex];
@@ -70,14 +73,12 @@ export default function Chat() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const sendMessage = useCallback(async (text: string) => {
-    if (!text.trim() || isLoading || !session) return;
-    const userMsg: Message = { role: "user", content: text.trim() };
-    const allMessages = [...messages, userMsg];
-    setMessages(allMessages);
-    setInput("");
+  const streamChatResponse = useCallback(async (
+    chatMessages: Message[],
+    extraPayload?: Record<string, any>
+  ) => {
+    if (!session) return;
     setIsLoading(true);
-
     let assistantSoFar = "";
 
     try {
@@ -87,7 +88,10 @@ export default function Chat() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ messages: allMessages }),
+        body: JSON.stringify({
+          messages: chatMessages.filter(m => !m.isUploading).map(({ role, content }) => ({ role, content })),
+          ...extraPayload,
+        }),
       });
 
       if (!resp.ok) {
@@ -159,26 +163,193 @@ export default function Chat() {
           } catch {}
         }
       }
-
-      // Ensure assistant message exists if we got content
-      if (assistantSoFar && messages.length === allMessages.length) {
-        setMessages((prev) => {
-          if (prev[prev.length - 1]?.role !== "assistant") {
-            return [...prev, { role: "assistant", content: assistantSoFar }];
-          }
-          return prev;
-        });
-      }
     } catch (e: any) {
       toast({ title: "Error", description: e.message, variant: "destructive" });
-      // Remove the user message if no assistant response came
       if (!assistantSoFar) {
         setMessages((prev) => prev.slice(0, -1));
       }
     } finally {
       setIsLoading(false);
     }
-  }, [messages, isLoading, session, toast]);
+  }, [session, toast]);
+
+  const sendMessage = useCallback(async (text: string) => {
+    if (!text.trim() || isLoading || !session) return;
+    const userMsg: Message = { role: "user", content: text.trim() };
+    const allMessages = [...messages, userMsg];
+    setMessages(allMessages);
+    setInput("");
+    await streamChatResponse(allMessages);
+  }, [messages, isLoading, session, streamChatResponse]);
+
+  const handleFileUpload = useCallback(async (file: File) => {
+    if (!user || !session || isLoading || isUploading) return;
+
+    setIsUploading(true);
+    const uploadMsg: Message = { role: "user", content: `📎 Uploading receipt: ${file.name}...`, isUploading: true };
+    setMessages(prev => [...prev, uploadMsg]);
+
+    try {
+      // 1. Upload file to storage
+      const timestamp = Date.now();
+      const filePath = `${user.id}/${timestamp}_${file.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from("receipts")
+        .upload(filePath, file);
+
+      if (uploadError) throw new Error(`Upload failed: ${uploadError.message}`);
+
+      // 2. Create receipt row
+      const today = new Date().toISOString().split("T")[0];
+      const { data: receipt, error: receiptError } = await supabase
+        .from("receipts")
+        .insert({
+          user_id: user.id,
+          pdf_url: filePath,
+          receipt_date: today,
+          vendor: "sams" as const,
+          parse_status: "PENDING" as const,
+        })
+        .select()
+        .single();
+
+      if (receiptError || !receipt) throw new Error("Failed to create receipt record");
+
+      // 3. Call parse-receipt
+      const parseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-receipt`;
+      await fetch(parseUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ receipt_id: receipt.id, file_path: filePath }),
+      });
+
+      // Update upload message
+      setMessages(prev => prev.map(m =>
+        m.isUploading ? { ...m, content: `📎 Parsing receipt: ${file.name}...` } : m
+      ));
+
+      // 4. Poll for completion
+      let parsedReceipt: any = null;
+      for (let i = 0; i < 60; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        const { data } = await supabase
+          .from("receipts")
+          .select("*")
+          .eq("id", receipt.id)
+          .single();
+
+        if (data && data.parse_status !== "PENDING") {
+          parsedReceipt = data;
+          break;
+        }
+      }
+
+      if (!parsedReceipt) throw new Error("Parsing timed out. Check the Receipts tab for status.");
+
+      if (parsedReceipt.parse_status === "FAILED") {
+        // Replace upload message with final user message, add error
+        setMessages(prev => [
+          ...prev.filter(m => !m.isUploading),
+          { role: "user", content: `📎 Uploaded: ${file.name}` },
+          { role: "assistant", content: "I couldn't read that receipt. Try a clearer photo or PDF, and make sure it's a Sam's Club or Walmart receipt." },
+        ]);
+        return;
+      }
+
+      // 5. Duplicate check — look for same store + date + total
+      if (parsedReceipt.total && parsedReceipt.receipt_date) {
+        const { data: dupes } = await supabase
+          .from("receipts")
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("receipt_date", parsedReceipt.receipt_date)
+          .eq("total", parsedReceipt.total)
+          .neq("id", receipt.id);
+
+        if (dupes && dupes.length > 0) {
+          // Delete the duplicate
+          await supabase.from("receipt_items").delete().eq("receipt_id", receipt.id);
+          await supabase.from("receipts").delete().eq("id", receipt.id);
+          await supabase.storage.from("receipts").remove([filePath]);
+
+          setMessages(prev => [
+            ...prev.filter(m => !m.isUploading),
+            { role: "user", content: `📎 Uploaded: ${file.name}` },
+            { role: "assistant", content: "This receipt appears to already be uploaded. I found an existing receipt with the same date and total." },
+          ]);
+          return;
+        }
+      }
+
+      // 6. Fetch parsed items with SKU data
+      const { data: items } = await supabase
+        .from("receipt_items")
+        .select("raw_name, qty, pack_size, line_total, unit_cost, sku_id, is_personal")
+        .eq("receipt_id", receipt.id);
+
+      // Get sell prices for matched SKUs
+      const skuIds = (items || []).filter(i => i.sku_id).map(i => i.sku_id!);
+      let skuPrices: Record<string, number> = {};
+      if (skuIds.length > 0) {
+        const { data: skus } = await supabase
+          .from("skus")
+          .select("id, sell_price")
+          .in("id", skuIds);
+        if (skus) {
+          for (const s of skus) {
+            if (s.sell_price) skuPrices[s.id] = Number(s.sell_price);
+          }
+        }
+      }
+
+      const receiptItems = (items || []).map(i => ({
+        name: i.raw_name,
+        qty: i.qty,
+        pack_size: i.pack_size,
+        line_total: i.line_total,
+        unit_cost: i.unit_cost ? Number(i.unit_cost) : null,
+        sell_price: i.sku_id ? skuPrices[i.sku_id] ?? null : null,
+        sku_id: i.sku_id,
+      }));
+
+      const receiptContext = {
+        receipt_id: receipt.id,
+        store_name: parsedReceipt.store_location || "Unknown Store",
+        receipt_date: parsedReceipt.receipt_date,
+        total: parsedReceipt.total,
+        item_count: parsedReceipt.item_count || items?.length || 0,
+        items: receiptItems,
+      };
+
+      // Replace upload message with final user message
+      setMessages(prev => {
+        const filtered = prev.filter(m => !m.isUploading);
+        return [...filtered, { role: "user", content: `📎 Receipt uploaded: ${parsedReceipt.store_location || file.name} — ${parsedReceipt.receipt_date}` }];
+      });
+
+      // 7. Send to chip-chat for trip summary
+      const currentMessages = messages.filter(m => !m.isUploading);
+      const summaryMessages: Message[] = [
+        ...currentMessages,
+        { role: "user", content: `I just uploaded a receipt from ${parsedReceipt.store_location || "a store"} dated ${parsedReceipt.receipt_date}. Give me a trip summary.` },
+      ];
+
+      await streamChatResponse(summaryMessages, { receipt_context: receiptContext });
+
+    } catch (e: any) {
+      toast({ title: "Upload Error", description: e.message, variant: "destructive" });
+      setMessages(prev => {
+        const filtered = prev.filter(m => !m.isUploading);
+        return [...filtered, { role: "assistant", content: `Failed to process receipt: ${e.message}` }];
+      });
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }, [user, session, isLoading, isUploading, messages, streamChatResponse, toast]);
 
   const saveMemory = async (text: string) => {
     if (!user) return;
@@ -302,6 +473,11 @@ export default function Chat() {
                         <div className="prose prose-sm max-w-none dark:prose-invert [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
                           <ReactMarkdown>{msg.content}</ReactMarkdown>
                         </div>
+                      ) : msg.isUploading ? (
+                        <span className="flex items-center gap-2">
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          {msg.content}
+                        </span>
                       ) : (
                         msg.content
                       )}
@@ -348,17 +524,39 @@ export default function Chat() {
         </div>
       </div>
 
+      {/* Hidden file input */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*,.pdf"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) handleFileUpload(f);
+        }}
+      />
+
       {/* Input — always visible */}
       <form onSubmit={handleSubmit} className="px-4 pb-4 pt-2 border-t bg-background">
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            disabled={isLoading || isUploading}
+            onClick={() => fileInputRef.current?.click()}
+            className="shrink-0"
+          >
+            <Paperclip className="h-4 w-4" />
+          </Button>
           <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Ask Chip anything..."
-            disabled={isLoading}
+            disabled={isLoading || isUploading}
             className="flex-1"
           />
-          <Button type="submit" size="icon" disabled={isLoading || !input.trim()}>
+          <Button type="submit" size="icon" disabled={isLoading || isUploading || !input.trim()}>
             <Send className="h-4 w-4" />
           </Button>
         </div>
