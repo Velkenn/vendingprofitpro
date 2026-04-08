@@ -6,7 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Bot, ChevronDown, ChevronUp, Send, Bookmark, Trash2, Sparkles, Copy, Check, Paperclip, Loader2 } from "lucide-react";
+import { Bot, ChevronDown, ChevronUp, Send, Bookmark, Trash2, Sparkles, Copy, Check, Loader2 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
 interface Message {
@@ -544,16 +544,6 @@ export default function Chat() {
       {/* Input — always visible */}
       <form onSubmit={handleSubmit} className="px-4 pb-4 pt-2 border-t bg-background">
         <div className="flex gap-2 items-center">
-          <Button
-            type="button"
-            size="icon"
-            variant="ghost"
-            disabled={isLoading || isUploading}
-            onClick={() => fileInputRef.current?.click()}
-            className="shrink-0"
-          >
-            <Paperclip className="h-4 w-4" />
-          </Button>
           <Input
             value={input}
             onChange={(e) => setInput(e.target.value)}
