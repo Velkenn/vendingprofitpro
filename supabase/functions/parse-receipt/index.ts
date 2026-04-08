@@ -951,7 +951,7 @@ serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
   try {
-    const { receipt_id, file_path } = await req.json();
+    const { receipt_id, file_path, model_override } = await req.json();
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -992,6 +992,9 @@ serve(async (req) => {
     }
 
     const aiConfig = await getUserAIConfig(supabase, receiptForAI.user_id, encryptionKey);
+    if (aiConfig && model_override) {
+      aiConfig.model = model_override;
+    }
     let parsed: any = null;
 
     if (imageFile) {

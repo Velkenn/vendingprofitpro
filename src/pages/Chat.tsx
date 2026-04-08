@@ -223,7 +223,7 @@ export default function Chat() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ receipt_id: receipt.id, file_path: filePath }),
+        body: JSON.stringify({ receipt_id: receipt.id, file_path: filePath, model_override: "google/gemini-2.5-flash" }),
       });
 
       // Update upload message
