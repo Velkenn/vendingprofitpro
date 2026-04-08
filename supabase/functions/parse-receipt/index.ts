@@ -1027,6 +1027,11 @@ serve(async (req) => {
             status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
+        if (msg.includes("AI_ERROR:503") || msg.includes("AI_ERROR:500")) {
+          return new Response(JSON.stringify({ error: `The AI model is temporarily unavailable. Please try again in a minute.` }), {
+            status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
         return new Response(JSON.stringify({ error: `Image parsing failed with ${aiConfig.provider}. Check your API key in Settings.` }), {
           status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
@@ -1066,6 +1071,11 @@ serve(async (req) => {
           if (msg.includes("AI_ERROR:401") || msg.includes("AI_ERROR:403")) {
             return new Response(JSON.stringify({ error: `Invalid or expired ${aiConfig.provider} API key. Please check your key in Settings → AI Settings.` }), {
               status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+          if (msg.includes("AI_ERROR:503") || msg.includes("AI_ERROR:500")) {
+            return new Response(JSON.stringify({ error: `The AI model is temporarily unavailable. Please try again in a minute.` }), {
+              status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" },
             });
           }
           return new Response(JSON.stringify({ error: `Parsing failed with ${aiConfig.provider}. Check your API key in Settings.` }), {
