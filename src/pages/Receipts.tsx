@@ -173,8 +173,34 @@ export default function Receipts() {
       setUploadReceipt(newReceipt);
       startProgressAnimation();
       setUploadState("parsing");
-      supabase.functions.invoke("parse-receipt", { body: { receipt_id: newReceipt.id, file_path: filePath } });
       pollReceipt(newReceipt.id);
+
+      void supabase.functions
+        .invoke("parse-receipt", { body: { receipt_id: newReceipt.id, file_path: filePath } })
+        .then(async ({ error }) => {
+          if (!error) return;
+
+          let message = error.message || "Receipt parsing failed";
+          const response = (error as any)?.context;
+          if (response && typeof response.clone === "function") {
+            try {
+              const body = await response.clone().json();
+              if (body?.error) message = body.error;
+            } catch {
+              // Fall back to the default error message
+            }
+          }
+
+          stopPolling();
+          setUploadState("error");
+          setErrorMsg(message);
+          loadReceipts();
+        })
+        .catch((err: any) => {
+          stopPolling();
+          setUploadState("error");
+          setErrorMsg(err?.message || "Receipt parsing failed");
+        });
     } catch (err: any) {
       setUploadState("error");
       setErrorMsg(err.message);

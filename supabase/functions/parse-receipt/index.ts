@@ -34,6 +34,75 @@ async function logUsage(supabase: any, userId: string, featureType: string, mode
   }
 }
 
+function getAIErrorCode(message: string): number | null {
+  const match = message.match(/AI_ERROR:(\d{3})/);
+  return match ? Number(match[1]) : null;
+}
+
+function isRetryableAIError(message: string): boolean {
+  const code = getAIErrorCode(message);
+  return code === 500 || code === 503;
+}
+
+async function retryTransientAIRequest<T>(
+  label: string,
+  fn: () => Promise<T>,
+  maxAttempts = 3,
+  baseDelayMs = 1500,
+): Promise<T> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : String(error);
+
+      if (!isRetryableAIError(message) || attempt === maxAttempts) {
+        throw error;
+      }
+
+      const delayMs = baseDelayMs * (2 ** (attempt - 1));
+      const code = getAIErrorCode(message);
+      console.warn(`${label} hit transient AI error (${code ?? "unknown"}). Retrying ${attempt + 1}/${maxAttempts} in ${delayMs}ms...`);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error(`${label} failed`);
+}
+
+function buildAIErrorResponse(provider: string, message: string, fallbackMessage: string): Response {
+  const code = getAIErrorCode(message);
+
+  if (code === 429) {
+    return new Response(JSON.stringify({ error: `Rate limited by ${provider}. Please try again later.` }), {
+      status: 429,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  if (code === 401 || code === 403) {
+    return new Response(JSON.stringify({ error: `Invalid or expired ${provider} API key. Please check your key in Settings → AI Settings.` }), {
+      status: 401,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  if (code === 500 || code === 503) {
+    return new Response(JSON.stringify({ error: `The AI model is temporarily unavailable after multiple retries. Please try again in a minute.` }), {
+      status: 503,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
+  }
+
+  return new Response(JSON.stringify({ error: `${fallbackMessage} with ${provider}. Check your API key in Settings.` }), {
+    status: 500,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
 const EXTRACT_TOOL = {
   type: "function",
   function: {
@@ -1009,32 +1078,18 @@ serve(async (req) => {
       }
       console.log(`Parsing image with AI vision (${aiConfig.provider}/${aiConfig.model})...`);
       try {
-        parsed = await parseImageWithUserProvider(bytes, file_path, aiConfig.provider, aiConfig.apiKey, aiConfig.model);
+        parsed = await retryTransientAIRequest(
+          "Image receipt parse",
+          () => parseImageWithUserProvider(bytes, file_path, aiConfig.provider, aiConfig.apiKey, aiConfig.model),
+        );
         console.log(`AI vision succeeded: ${parsed.items?.length || 0} items`);
         const outputEstimate = JSON.stringify(parsed).length;
         await logUsage(supabase, receiptForAI.user_id, "receipt_parse", aiConfig.model, bytes.length, outputEstimate);
       } catch (aiErr: any) {
-        console.error("AI vision error:", aiErr.message);
+        const msg = aiErr instanceof Error ? aiErr.message : String(aiErr);
+        console.error("AI vision error:", msg);
         await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-        const msg = aiErr.message || "";
-        if (msg.includes("AI_ERROR:429")) {
-          return new Response(JSON.stringify({ error: `Rate limited by ${aiConfig.provider}. Please try again later.` }), {
-            status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-        if (msg.includes("AI_ERROR:401") || msg.includes("AI_ERROR:403")) {
-          return new Response(JSON.stringify({ error: `Invalid or expired ${aiConfig.provider} API key. Please check your key in Settings → AI Settings.` }), {
-            status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-        if (msg.includes("AI_ERROR:503") || msg.includes("AI_ERROR:500")) {
-          return new Response(JSON.stringify({ error: `The AI model is temporarily unavailable. Please try again in a minute.` }), {
-            status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
-        }
-        return new Response(JSON.stringify({ error: `Image parsing failed with ${aiConfig.provider}. Check your API key in Settings.` }), {
-          status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        return buildAIErrorResponse(aiConfig.provider, msg, "Image parsing failed");
       }
     } else {
       // PDF PATH: extract text first, then parse
@@ -1055,32 +1110,31 @@ serve(async (req) => {
       if (aiConfig) {
         console.log(`Using AI (${aiConfig.provider}/${aiConfig.model}) as primary parser...`);
         try {
-          parsed = await parseWithUserProvider(rawText, aiConfig.provider, aiConfig.apiKey, aiConfig.model);
+          parsed = await retryTransientAIRequest(
+            "PDF receipt parse",
+            () => parseWithUserProvider(rawText, aiConfig.provider, aiConfig.apiKey, aiConfig.model),
+          );
           console.log(`AI succeeded: ${parsed.items?.length || 0} items`);
           const outputEstimate = JSON.stringify(parsed).length;
           await logUsage(supabase, receiptForAI.user_id, "receipt_parse", aiConfig.model, rawText.length + SYSTEM_PROMPT.length, outputEstimate);
         } catch (aiErr: any) {
-          console.error("AI error:", aiErr.message);
-          await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-          const msg = aiErr.message || "";
-          if (msg.includes("AI_ERROR:429")) {
-            return new Response(JSON.stringify({ error: `Rate limited by ${aiConfig.provider}. Please try again later.` }), {
-              status: 429, headers: { ...corsHeaders, "Content-Type": "application/json" },
-            });
+          const msg = aiErr instanceof Error ? aiErr.message : String(aiErr);
+          console.error("AI error:", msg);
+
+          if (isRetryableAIError(msg)) {
+            console.warn("AI remained unavailable after retries, attempting regex fallback...");
+            const fallbackParsed = parseReceiptText(rawText);
+            if (fallbackParsed && fallbackParsed.items.length > 0) {
+              parsed = fallbackParsed;
+              console.log(`Regex fallback succeeded: ${parsed.items.length} items`);
+            } else {
+              await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
+              return buildAIErrorResponse(aiConfig.provider, msg, "Parsing failed");
+            }
+          } else {
+            await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
+            return buildAIErrorResponse(aiConfig.provider, msg, "Parsing failed");
           }
-          if (msg.includes("AI_ERROR:401") || msg.includes("AI_ERROR:403")) {
-            return new Response(JSON.stringify({ error: `Invalid or expired ${aiConfig.provider} API key. Please check your key in Settings → AI Settings.` }), {
-              status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
-            });
-          }
-          if (msg.includes("AI_ERROR:503") || msg.includes("AI_ERROR:500")) {
-            return new Response(JSON.stringify({ error: `The AI model is temporarily unavailable. Please try again in a minute.` }), {
-              status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" },
-            });
-          }
-          return new Response(JSON.stringify({ error: `Parsing failed with ${aiConfig.provider}. Check your API key in Settings.` }), {
-            status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
         }
       } else {
         console.log("No AI provider configured, falling back to regex parser...");
