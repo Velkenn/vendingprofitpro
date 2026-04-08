@@ -993,7 +993,9 @@ serve(async (req) => {
 
     const aiConfig = await getUserAIConfig(supabase, receiptForAI.user_id, encryptionKey);
     if (aiConfig && model_override) {
-      aiConfig.model = model_override;
+      // Strip provider prefix (e.g. "google/gemini-2.5-flash" -> "gemini-2.5-flash")
+      const slashIdx = model_override.indexOf("/");
+      aiConfig.model = slashIdx !== -1 ? model_override.slice(slashIdx + 1) : model_override;
     }
     let parsed: any = null;
 
