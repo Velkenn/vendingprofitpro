@@ -217,7 +217,7 @@ export default function Chat() {
 
       // 3. Call parse-receipt
       const parseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/parse-receipt`;
-      await fetch(parseUrl, {
+      const parseResp = await fetch(parseUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -225,6 +225,11 @@ export default function Chat() {
         },
         body: JSON.stringify({ receipt_id: receipt.id, file_path: filePath, model_override: "google/gemini-2.5-flash" }),
       });
+
+      if (!parseResp.ok) {
+        const parseErr = await parseResp.json().catch(() => ({ error: `Parsing failed (Error ${parseResp.status})` }));
+        throw new Error(parseErr.error || `Parsing failed (Error ${parseResp.status})`);
+      }
 
       // Update upload message
       setMessages(prev => prev.map(m =>
