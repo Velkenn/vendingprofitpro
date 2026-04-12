@@ -164,7 +164,7 @@ export default function Index() {
     const ranked = Array.from(skuMap.values())
       .map(s => ({ skuId: s.skuId, skuName: s.skuName, profit: s.revenue - s.cost, maxAbsProfit: 0 }))
       .sort((a, b) => a.profit - b.profit)
-      .slice(0, 8);
+      ;
 
     const maxAbs = Math.max(...ranked.map(r => Math.abs(r.profit)), 1);
     for (const r of ranked) r.maxAbsProfit = maxAbs;
@@ -393,7 +393,7 @@ export default function Index() {
             <TrendingDown className="h-4 w-4" /> Needs Attention
           </h2>
           <Card className="border-0 shadow-sm">
-            <CardContent className="p-4 space-y-2">
+            <CardContent className="p-4 space-y-2 max-h-64 overflow-y-auto">
               {bottomSkus.map((sku) => {
                 const pct = Math.abs(sku.profit) / sku.maxAbsProfit * 100;
                 const isNeg = sku.profit < 0;
