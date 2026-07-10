@@ -700,6 +700,33 @@ async function parseWithUserProvider(
     return fc.functionCall.args;
   }
 
+  if (provider === "lovable") {
+    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: buildUserPrompt(rawText) },
+        ],
+        tools: [EXTRACT_TOOL],
+        tool_choice: { type: "function", function: { name: "extract_receipt" } },
+      }),
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`AI_ERROR:${res.status}:${t}`);
+    }
+    const result = await res.json();
+    const toolCall = result.choices?.[0]?.message?.tool_calls?.[0];
+    if (!toolCall) throw new Error("AI did not return structured data");
+    return parseToolCallResult(toolCall);
+  }
+
   throw new Error(`Unknown provider: ${provider}`);
 }
 
@@ -855,6 +882,39 @@ async function parseImageWithUserProvider(
     return fc.functionCall.args;
   }
 
+  if (provider === "lovable") {
+    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: SYSTEM_PROMPT },
+          {
+            role: "user",
+            content: [
+              { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Data}` } },
+              { type: "text", text: userPrompt },
+            ],
+          },
+        ],
+        tools: [EXTRACT_TOOL],
+        tool_choice: { type: "function", function: { name: "extract_receipt" } },
+      }),
+    });
+    if (!res.ok) {
+      const t = await res.text();
+      throw new Error(`AI_ERROR:${res.status}:${t}`);
+    }
+    const result = await res.json();
+    const toolCall = result.choices?.[0]?.message?.tool_calls?.[0];
+    if (!toolCall) throw new Error("AI did not return structured data");
+    return parseToolCallResult(toolCall);
+  }
+
   throw new Error(`Unknown provider: ${provider}`);
 }
 
@@ -973,6 +1033,31 @@ async function normalizeNamesWithAI(
       if (fc?.functionCall?.args?.names) {
         for (const n of fc.functionCall.args.names) {
           result.set(n.raw_name.toLowerCase(), n.normalized_name);
+        }
+      }
+    } else if (provider === "lovable") {
+      const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: prompt },
+          ],
+          tools: [NORMALIZE_TOOL],
+          tool_choice: { type: "function", function: { name: "normalize_names" } },
+        }),
+      });
+      if (!res.ok) { console.error("Normalize AI error:", await res.text()); return result; }
+      const data = await res.json();
+      const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
+      if (toolCall) {
+        const parsed = parseToolCallResult(toolCall);
+        if (parsed?.names) {
+          for (const n of parsed.names) {
+            result.set(n.raw_name.toLowerCase(), n.normalized_name);
+          }
         }
       }
     }
