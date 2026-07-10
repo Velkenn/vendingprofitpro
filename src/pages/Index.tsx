@@ -11,21 +11,22 @@ import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  Upload as UploadIcon, FileText, Loader2, CheckCircle, XCircle,
-  DollarSign, TrendingDown, AlertTriangle, Tag, Trophy, BarChart3,
-  ChevronLeft, ChevronRight
+  Upload as UploadIcon, Loader2, CheckCircle, XCircle,
+  DollarSign, TrendingUp, AlertTriangle, Tag, ChevronLeft, ChevronRight,
+  CheckCircle2, Circle, MessageCircle, Cpu
 } from "lucide-react";
 import { startOfMonth, endOfMonth, format, addMonths, subMonths, isSameMonth } from "date-fns";
 import { useSKUDetail } from "@/contexts/SKUDetailContext";
 
 type UploadState = "idle" | "uploading" | "parsing" | "done" | "error";
 
-interface BottomSku {
+interface MoverSku {
   skuId: string;
   skuName: string;
   profit: number;
-  maxAbsProfit: number;
 }
+
+const POLL_TIMEOUT_MS = 90_000;
 
 export default function Index() {
   const { user } = useAuth();
@@ -38,14 +39,19 @@ export default function Index() {
   const [totalSpend, setTotalSpend] = useState(0);
   const [needsReviewCount, setNeedsReviewCount] = useState(0);
   const [needsPriceCount, setNeedsPriceCount] = useState(0);
-  const [bottomSkus, setBottomSkus] = useState<BottomSku[]>([]);
+  const [topLosers, setTopLosers] = useState<MoverSku[]>([]);
+  const [topGainers, setTopGainers] = useState<MoverSku[]>([]);
   const [unitsPurchased, setUnitsPurchased] = useState(0);
   const [avgMargin, setAvgMargin] = useState(0);
   const [bestMachine, setBestMachine] = useState("");
   const [loading, setLoading] = useState(true);
 
+  // First-run checklist counts
+  const [machineCount, setMachineCount] = useState(0);
+  const [receiptCount, setReceiptCount] = useState(0);
+  const [chatCount, setChatCount] = useState(0);
+
   // Upload state
-  const [file, setFile] = useState<File | null>(null);
   const [uploadState, setUploadState] = useState<UploadState>("idle");
   const [uploadReceipt, setUploadReceipt] = useState<any>(null);
   const [errorMsg, setErrorMsg] = useState("");
@@ -53,6 +59,7 @@ export default function Index() {
   const [parseLabel, setParseLabel] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const progressRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Month navigation
   const [selectedMonth, setSelectedMonth] = useState(new Date());
@@ -69,6 +76,7 @@ export default function Index() {
   const stopPolling = useCallback(() => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
     if (progressRef.current) { clearInterval(progressRef.current); progressRef.current = null; }
+    if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
   }, []);
 
   useEffect(() => () => stopPolling(), [stopPolling]);
@@ -82,7 +90,6 @@ export default function Index() {
     return "Good evening";
   })();
 
-  // Load dashboard data
   const loadDashboard = useCallback(async () => {
     if (!user) return;
     setLoading(true);
@@ -90,30 +97,27 @@ export default function Index() {
     const monthStart = format(startOfMonth(selectedMonth), "yyyy-MM-dd");
     const monthEnd = format(endOfMonth(selectedMonth), "yyyy-MM-dd");
 
-    // Parallel fetches
-    const [receiptRes, salesRes, machineRes, reviewRes, priceRes] = await Promise.all([
-      // This month's receipts → items
+    const [receiptRes, salesRes, machineRes, reviewRes, priceRes, allReceiptRes, chatRes] = await Promise.all([
       supabase.from("receipts").select("id").gte("receipt_date", monthStart).lte("receipt_date", monthEnd),
-      // This month's machine sales
       supabase.from("machine_sales").select("id, machine_id, cash_amount, credit_amount").gte("date", monthStart).lte("date", monthEnd),
-      // All machines
       supabase.from("machines").select("id, name"),
-      // Needs review count
       supabase.from("receipt_items").select("id", { count: "exact", head: true }).eq("needs_review", true),
-      // Needs price count
       supabase.from("skus").select("id", { count: "exact", head: true }).is("sell_price", null).eq("default_is_personal", false),
+      supabase.from("receipts").select("id", { count: "exact", head: true }),
+      supabase.from("chip_memories").select("id", { count: "exact", head: true }),
     ]);
 
     setNeedsReviewCount(reviewRes.count || 0);
     setNeedsPriceCount(priceRes.count || 0);
     setMachines((machineRes.data || []).map(m => ({ id: m.id, name: m.name })));
+    setMachineCount((machineRes.data || []).length);
+    setReceiptCount(allReceiptRes.count || 0);
+    setChatCount(chatRes.count || 0);
 
-    // Revenue from machine sales
     const sales = salesRes.data || [];
     const rev = sales.reduce((s, r) => s + Number(r.cash_amount) + Number(r.credit_amount), 0);
     setTotalRevenue(rev);
 
-    // Best machine
     const machineRevMap = new Map<string, number>();
     for (const s of sales) {
       machineRevMap.set(s.machine_id, (machineRevMap.get(s.machine_id) || 0) + Number(s.cash_amount) + Number(s.credit_amount));
@@ -126,30 +130,27 @@ export default function Index() {
     const bestM = (machineRes.data || []).find(m => m.id === bestId);
     setBestMachine(bestM?.name || "—");
 
-    // Spend from receipt items this month
     const receiptIds = (receiptRes.data || []).map(r => r.id);
     let items: any[] = [];
     if (receiptIds.length > 0) {
       const { data } = await supabase
         .from("receipt_items")
-        .select("line_total, qty, pack_size, sku_id, is_personal, skus(sell_price, sku_name)")
+        .select("line_total, qty, pack_size, sku_id, is_personal, skus(sell_price, sku_name, default_is_personal)")
         .in("receipt_id", receiptIds)
         .eq("is_personal", false);
-      items = data || [];
+      items = (data || []).filter(i => !(i.skus as any)?.default_is_personal);
     }
 
     const spend = items.reduce((s, i) => s + (Number(i.line_total) || 0), 0);
     setTotalSpend(spend);
 
-    // Units purchased
     const units = items.reduce((s, i) => s + ((i.qty || 1) * (i.pack_size || 1)), 0);
     setUnitsPurchased(units);
 
-    // Avg margin
     const profit = rev - spend;
     setAvgMargin(rev > 0 ? (profit / rev) * 100 : 0);
 
-    // Bottom 8 SKUs by profit
+    // Top movers: est profit if all units sell
     const skuMap = new Map<string, { skuName: string; skuId: string; revenue: number; cost: number }>();
     for (const item of items) {
       const sku = item.skus as any;
@@ -160,22 +161,17 @@ export default function Index() {
       entry.cost += Number(item.line_total) || 0;
       skuMap.set(id, entry);
     }
-
     const ranked = Array.from(skuMap.values())
-      .map(s => ({ skuId: s.skuId, skuName: s.skuName, profit: s.revenue - s.cost, maxAbsProfit: 0 }))
-      .sort((a, b) => a.profit - b.profit)
-      ;
-
-    const maxAbs = Math.max(...ranked.map(r => Math.abs(r.profit)), 1);
-    for (const r of ranked) r.maxAbsProfit = maxAbs;
-    setBottomSkus(ranked);
+      .map(s => ({ skuId: s.skuId, skuName: s.skuName, profit: s.revenue - s.cost }))
+      .sort((a, b) => a.profit - b.profit);
+    setTopLosers(ranked.slice(0, 5));
+    setTopGainers(ranked.slice(-3).reverse());
 
     setLoading(false);
   }, [user, selectedMonth]);
 
   useEffect(() => { loadDashboard(); }, [loadDashboard]);
 
-  // Upload logic
   const startProgressAnimation = useCallback(() => {
     setParseProgress(0);
     setParseLabel("Uploading complete");
@@ -210,6 +206,11 @@ export default function Index() {
         }
       }
     }, 2000);
+    timeoutRef.current = setTimeout(() => {
+      stopPolling();
+      setUploadState("error");
+      setErrorMsg("This is taking longer than expected — check the Receipts tab.");
+    }, POLL_TIMEOUT_MS);
   }, [stopPolling, loadDashboard]);
 
   const handleUpload = async (selectedFile: File) => {
@@ -225,7 +226,7 @@ export default function Index() {
         .from("receipts")
         .insert({
           user_id: user.id,
-          vendor: "sams" as const,
+          vendor: "other" as const,
           receipt_date: new Date().toISOString().split("T")[0],
           parse_status: "PENDING" as const,
           pdf_url: filePath,
@@ -237,8 +238,30 @@ export default function Index() {
       setUploadReceipt(newReceipt);
       startProgressAnimation();
       setUploadState("parsing");
-      supabase.functions.invoke("parse-receipt", { body: { receipt_id: newReceipt.id, file_path: filePath } });
       pollReceipt(newReceipt.id);
+
+      // Capture the invoke result so real errors surface instead of hanging at 95%
+      supabase.functions
+        .invoke("parse-receipt", { body: { receipt_id: newReceipt.id, file_path: filePath } })
+        .then(async ({ error }) => {
+          if (!error) return;
+          let message = error.message || "Receipt parsing failed";
+          const response = (error as any)?.context;
+          if (response && typeof response.clone === "function") {
+            try {
+              const body = await response.clone().json();
+              if (body?.error) message = body.error;
+            } catch { /* keep default */ }
+          }
+          stopPolling();
+          setUploadState("error");
+          setErrorMsg(message);
+        })
+        .catch((err: any) => {
+          stopPolling();
+          setUploadState("error");
+          setErrorMsg(err?.message || "Receipt parsing failed");
+        });
     } catch (err: any) {
       setUploadState("error");
       setErrorMsg(err.message);
@@ -247,7 +270,6 @@ export default function Index() {
 
   const handleUploadReset = () => {
     stopPolling();
-    setFile(null);
     setUploadReceipt(null);
     setUploadState("idle");
     setErrorMsg("");
@@ -257,10 +279,10 @@ export default function Index() {
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
-    if (f) { setFile(f); handleUpload(f); }
+    if (f) handleUpload(f);
+    e.target.value = "";
   };
 
-  // Log Sale
   const handleSaveSale = async () => {
     if (!user || !selectedMachine || saleSaving) return;
     setSaleSaving(true);
@@ -280,10 +302,28 @@ export default function Index() {
   };
 
   const fmt = (n: number) => `$${n.toFixed(2)}`;
-  const hasAlerts = needsReviewCount > 0 || needsPriceCount > 0;
+  const isFirstRun = !loading && machineCount === 0 && receiptCount === 0 && chatCount === 0;
+
+  // First-run checklist
+  if (isFirstRun) {
+    return (
+      <div className="px-4 pt-6 pb-4 space-y-4">
+        <h1 className="text-2xl font-bold tracking-tight">{greeting}</h1>
+        <p className="text-sm text-muted-foreground">Let's get you set up in three steps.</p>
+        <Card className="border-0 shadow-md">
+          <CardContent className="p-4 space-y-3">
+            <ChecklistStep done={machineCount > 0} label="Add a machine" icon={Cpu} onClick={() => navigate("/app/machines")} />
+            <ChecklistStep done={receiptCount > 0} label="Upload your first receipt" icon={UploadIcon} onClick={() => fileRef.current?.click()} />
+            <ChecklistStep done={chatCount > 0} label="Ask Chip a question" icon={MessageCircle} onClick={() => navigate("/app/chat")} />
+          </CardContent>
+        </Card>
+        <input ref={fileRef} type="file" accept=".pdf,image/*" className="hidden" onChange={handleFileChange} />
+      </div>
+    );
+  }
 
   return (
-    <div className="px-4 pt-6 pb-4 space-y-5">
+    <div className="px-4 pt-6 pb-4 space-y-4">
       {/* Greeting */}
       <h1 className="text-2xl font-bold tracking-tight">{greeting}</h1>
 
@@ -323,7 +363,19 @@ export default function Index() {
         </CardContent>
       </Card>
 
-      {/* Upload Progress (inline, replaces action buttons while active) */}
+      {/* Action Buttons — directly under hero */}
+      {uploadState === "idle" && (
+        <div className="grid grid-cols-2 gap-3">
+          <Button className="h-14 text-base gap-2" onClick={() => fileRef.current?.click()}>
+            <UploadIcon className="h-5 w-5" /> Upload Receipt
+          </Button>
+          <Button variant="outline" className="h-14 text-base gap-2" onClick={() => setSalesOpen(true)}>
+            <DollarSign className="h-5 w-5" /> Log Sales
+          </Button>
+        </div>
+      )}
+
+      {/* Upload Progress */}
       {uploadState !== "idle" && (
         <Card className="border-0 shadow-sm">
           <CardContent className="p-4">
@@ -372,105 +424,64 @@ export default function Index() {
         </Card>
       )}
 
-      {/* Action Buttons */}
-      {uploadState === "idle" && (
-        <div className="grid grid-cols-2 gap-3">
-          <Button className="h-14 text-base gap-2" onClick={() => fileRef.current?.click()}>
-            <UploadIcon className="h-5 w-5" /> Upload Receipt
-          </Button>
-          <Button variant="outline" className="h-14 text-base gap-2" onClick={() => setSalesOpen(true)}>
-            <DollarSign className="h-5 w-5" /> Log Sales
-          </Button>
-        </div>
-      )}
-
       <input ref={fileRef} type="file" accept=".pdf,image/*" className="hidden" onChange={handleFileChange} />
 
-      {/* Needs Attention - Bottom 8 SKUs */}
-      {bottomSkus.length > 0 && (
+      {/* Top Movers */}
+      {(topLosers.length > 0 || topGainers.length > 0) && (
         <div>
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3 flex items-center gap-1.5">
-            <TrendingDown className="h-4 w-4" /> Needs Attention
+          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2 flex items-center gap-1.5">
+            <TrendingUp className="h-4 w-4" /> Top Movers
           </h2>
           <Card className="border-0 shadow-sm">
-            <CardContent className="p-4 space-y-2 max-h-64 overflow-y-auto">
-              {bottomSkus.map((sku) => {
-                const pct = Math.abs(sku.profit) / sku.maxAbsProfit * 100;
-                const isNeg = sku.profit < 0;
-                return (
-                  <div key={sku.skuId} className="flex items-center gap-2">
-                    <p
-                      className="text-xs w-28 truncate cursor-pointer underline decoration-dotted"
-                      onClick={() => openSKUDetail(sku.skuId)}
-                    >
-                      {sku.skuName}
-                    </p>
-                    <div className="flex-1 h-4 rounded-full bg-muted overflow-hidden">
-                      <div
-                        className={`h-full rounded-full ${isNeg ? "bg-destructive/70" : "bg-accent/70"}`}
-                        style={{ width: `${Math.max(pct, 4)}%` }}
-                      />
-                    </div>
-                    <p className={`text-xs font-semibold w-16 text-right ${isNeg ? "text-destructive" : "text-muted-foreground"}`}>
-                      {isNeg ? "-" : "+"}{fmt(Math.abs(sku.profit))}
-                    </p>
-                  </div>
-                );
-              })}
+            <CardContent className="p-4 space-y-3">
+              <p className="text-[11px] text-muted-foreground italic">Est. profit if all units sell</p>
+              {topGainers.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-[11px] font-semibold text-primary uppercase tracking-wider">Top 3 gainers</p>
+                  {topGainers.map(s => <MoverRow key={s.skuId} sku={s} onClick={() => openSKUDetail(s.skuId)} />)}
+                </div>
+              )}
+              {topLosers.length > 0 && (
+                <div className="space-y-1.5">
+                  <p className="text-[11px] font-semibold text-destructive uppercase tracking-wider">Bottom 5 losers</p>
+                  {topLosers.map(s => <MoverRow key={s.skuId} sku={s} onClick={() => openSKUDetail(s.skuId)} />)}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
       )}
 
-      {/* Compact Stat Row */}
-      <div className="grid grid-cols-3 gap-2">
-        <Card className="border-0 shadow-sm">
-          <CardContent className="p-3 text-center">
-            <p className="text-lg font-bold">{loading ? "—" : unitsPurchased.toLocaleString()}</p>
-            <p className="text-[10px] text-muted-foreground leading-tight">Units Purchased</p>
-          </CardContent>
-        </Card>
-        <Card className="border-0 shadow-sm">
-          <CardContent className="p-3 text-center">
-            <p className="text-lg font-bold">{loading ? "—" : `${avgMargin.toFixed(1)}%`}</p>
-            <p className="text-[10px] text-muted-foreground leading-tight">Avg Margin</p>
-          </CardContent>
-        </Card>
-        <Card className="border-0 shadow-sm">
-          <CardContent className="p-3 text-center">
-            <p className="text-lg font-bold truncate">{loading ? "—" : (bestMachine || "—")}</p>
-            <p className="text-[10px] text-muted-foreground leading-tight">Best Machine</p>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Inline Alerts */}
-      {hasAlerts && (
-        <Card className="border-0 shadow-sm">
-          <CardContent className="p-3 space-y-2">
-            {needsReviewCount > 0 && (
-              <div
-                className="flex items-center gap-2 cursor-pointer rounded-lg p-2 hover:bg-muted/50 transition-colors"
-                onClick={() => navigate("/app/needs-review")}
-              >
-                <AlertTriangle className="h-4 w-4 text-accent" />
-                <p className="text-sm flex-1">{needsReviewCount} items need review</p>
-                <Badge variant="secondary" className="text-xs">{needsReviewCount}</Badge>
-              </div>
-            )}
-            {needsPriceCount > 0 && (
-              <div
-                className="flex items-center gap-2 cursor-pointer rounded-lg p-2 hover:bg-muted/50 transition-colors"
-                onClick={() => navigate("/app/needs-price")}
-              >
-                <Tag className="h-4 w-4 text-accent" />
-                <p className="text-sm flex-1">{needsPriceCount} SKUs need a price</p>
-                <Badge variant="secondary" className="text-xs">{needsPriceCount}</Badge>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+      {/* Consolidated Summary */}
+      <Card className="border-0 shadow-sm">
+        <CardContent className="p-4 space-y-2">
+          <div className="grid grid-cols-3 gap-3 pb-2 border-b">
+            <SummaryStat label="Units purchased" value={loading ? "—" : unitsPurchased.toLocaleString()} />
+            <SummaryStat label="Avg margin" value={loading ? "—" : `${avgMargin.toFixed(1)}%`} />
+            <SummaryStat label="Best machine" value={loading ? "—" : (bestMachine || "—")} />
+          </div>
+          {needsReviewCount > 0 && (
+            <button
+              className="flex items-center gap-2 w-full rounded-lg p-2 hover:bg-muted/50 transition-colors text-left"
+              onClick={() => navigate("/app/needs-review")}
+            >
+              <AlertTriangle className="h-4 w-4 text-accent shrink-0" />
+              <p className="text-sm flex-1">{needsReviewCount} items need review</p>
+              <Badge variant="secondary" className="text-xs">{needsReviewCount}</Badge>
+            </button>
+          )}
+          {needsPriceCount > 0 && (
+            <button
+              className="flex items-center gap-2 w-full rounded-lg p-2 hover:bg-muted/50 transition-colors text-left"
+              onClick={() => navigate("/app/needs-price")}
+            >
+              <Tag className="h-4 w-4 text-accent shrink-0" />
+              <p className="text-sm flex-1">{needsPriceCount} SKUs need a price</p>
+              <Badge variant="secondary" className="text-xs">{needsPriceCount}</Badge>
+            </button>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Log Sales Bottom Sheet */}
       <Sheet open={salesOpen} onOpenChange={setSalesOpen}>
@@ -520,5 +531,57 @@ export default function Index() {
         </SheetContent>
       </Sheet>
     </div>
+  );
+}
+
+function MoverRow({ sku, onClick }: { sku: MoverSku; onClick: () => void }) {
+  const isNeg = sku.profit < 0;
+  const fmt = (n: number) => `$${n.toFixed(2)}`;
+  return (
+    <div className="flex items-center gap-2">
+      <p
+        className="text-xs flex-1 truncate cursor-pointer underline decoration-dotted"
+        onClick={onClick}
+      >
+        {sku.skuName}
+      </p>
+      <p className={`text-xs font-semibold w-16 text-right ${isNeg ? "text-destructive" : "text-primary"}`}>
+        {isNeg ? "-" : "+"}{fmt(Math.abs(sku.profit))}
+      </p>
+    </div>
+  );
+}
+
+function SummaryStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="text-center">
+      <p className="text-base font-bold truncate">{value}</p>
+      <p className="text-xs text-muted-foreground leading-tight">{label}</p>
+    </div>
+  );
+}
+
+function ChecklistStep({
+  done, label, icon: Icon, onClick,
+}: {
+  done: boolean;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className="flex items-center gap-3 w-full rounded-lg p-3 hover:bg-muted/50 transition-colors text-left"
+      onClick={onClick}
+    >
+      {done ? (
+        <CheckCircle2 className="h-5 w-5 text-primary shrink-0" />
+      ) : (
+        <Circle className="h-5 w-5 text-muted-foreground shrink-0" />
+      )}
+      <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
+      <p className={`text-sm flex-1 ${done ? "line-through text-muted-foreground" : "font-medium"}`}>{label}</p>
+      {!done && <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />}
+    </button>
   );
 }
