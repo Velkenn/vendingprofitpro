@@ -1316,15 +1316,17 @@ serve(async (req) => {
       // Fetch existing SKUs for this user FIRST (needed for normalization)
       const { data: existingSkus } = await supabase
         .from("skus")
-        .select("id, sku_name")
+        .select("id, sku_name, default_is_personal")
         .eq("user_id", receiptData.user_id);
 
       const skuByName = new Map<string, string>();
       const existingSkuNames: string[] = [];
+      const personalSkuIds = new Set<string>();
       if (existingSkus) {
         for (const sku of existingSkus) {
           skuByName.set(sku.sku_name.toLowerCase(), sku.id);
           existingSkuNames.push(sku.sku_name);
+          if (sku.default_is_personal) personalSkuIds.add(sku.id);
         }
       }
 
@@ -1417,6 +1419,12 @@ serve(async (req) => {
               });
             }
           }
+        }
+
+        // Auto-flag as personal + skip review when the matched SKU is default-personal
+        if (matchedSkuId && personalSkuIds.has(matchedSkuId)) {
+          matchedIsPersonal = true;
+          needsReview = false;
         }
 
         itemsToInsert.push({
