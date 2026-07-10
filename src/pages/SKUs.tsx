@@ -55,6 +55,7 @@ export default function SKUs() {
   const { openSKUDetail } = useSKUDetail();
   const [skus, setSkus] = useState<Sku[]>([]);
   const [search, setSearch] = useState("");
+  const [showPersonal, setShowPersonal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<EditForm | null>(null);
@@ -97,6 +98,7 @@ export default function SKUs() {
   const categories = [...new Set(skus.map((s) => s.category).filter(Boolean))] as string[];
 
   const filtered = skus.filter((s) =>
+    (showPersonal || !s.default_is_personal) &&
     s.sku_name.toLowerCase().includes(search.toLowerCase())
   );
 
@@ -286,7 +288,7 @@ export default function SKUs() {
         )}
       </div>
 
-      <div className="relative mb-4">
+      <div className="relative mb-3">
         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <Input
           placeholder="Search SKUs..."
@@ -295,6 +297,12 @@ export default function SKUs() {
           className="pl-9"
         />
       </div>
+
+      <div className="flex items-center gap-2 mb-4">
+        <Switch id="show-personal" checked={showPersonal} onCheckedChange={setShowPersonal} />
+        <Label htmlFor="show-personal" className="text-xs text-muted-foreground">Show personal SKUs</Label>
+      </div>
+
 
       {loading ? (
         <p className="text-sm text-muted-foreground">Loading...</p>
