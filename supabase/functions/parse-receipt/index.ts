@@ -1427,16 +1427,20 @@ serve(async (req) => {
           needsReview = false;
         }
 
+        const finalQty = item.qty || 1;
+        const finalPack = matchedPackSize && matchedPackSize > 0 ? matchedPackSize : 1;
+        const computedUnitCost = Math.round((Number(item.line_total) / (finalQty * finalPack)) * 100) / 100;
+
         itemsToInsert.push({
           receipt_id,
           user_id: receiptData.user_id,
           sku_id: matchedSkuId,
           raw_name: item.raw_name,
           normalized_name: normalizedName,
-          qty: item.qty || 1,
+          qty: finalQty,
           pack_size: matchedPackSize,
           pack_size_uom: item.pack_size_uom || null,
-          unit_cost: item.unit_cost || null,
+          unit_cost: computedUnitCost,
           line_total: item.line_total,
           is_personal: matchedIsPersonal,
           needs_review: needsReview,
