@@ -531,7 +531,7 @@ Items typically appear as product descriptions with quantities and prices. Look 
 
 CRITICAL: You MUST extract EVERY item from the text. Count carefully and do not miss any items. Do NOT include subtotals, taxes, totals, payment methods, or non-item lines.
 
-Compute unit_cost = line_total / (qty * pack_size) if pack size exists, else line_total / qty.
+Do NOT compute unit_cost — only extract raw qty, pack_size, and line_total exactly as printed.
 For normalized names, use format: {Brand/Product} – {Flavor/Variant}`;
 
 const NORMALIZE_TOOL = {
@@ -1427,16 +1427,20 @@ serve(async (req) => {
           needsReview = false;
         }
 
+        const finalQty = item.qty || 1;
+        const finalPack = matchedPackSize && matchedPackSize > 0 ? matchedPackSize : 1;
+        const computedUnitCost = Math.round((Number(item.line_total) / (finalQty * finalPack)) * 100) / 100;
+
         itemsToInsert.push({
           receipt_id,
           user_id: receiptData.user_id,
           sku_id: matchedSkuId,
           raw_name: item.raw_name,
           normalized_name: normalizedName,
-          qty: item.qty || 1,
+          qty: finalQty,
           pack_size: matchedPackSize,
           pack_size_uom: item.pack_size_uom || null,
-          unit_cost: item.unit_cost || null,
+          unit_cost: computedUnitCost,
           line_total: item.line_total,
           is_personal: matchedIsPersonal,
           needs_review: needsReview,
