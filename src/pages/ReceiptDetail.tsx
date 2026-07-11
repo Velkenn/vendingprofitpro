@@ -174,7 +174,7 @@ export default function ReceiptDetail() {
                 </div>
               </CardContent>
             </Card>
-          ))}
+          );})}
         </div>
       )}
 
