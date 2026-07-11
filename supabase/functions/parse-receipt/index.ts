@@ -531,7 +531,7 @@ Items typically appear as product descriptions with quantities and prices. Look 
 
 CRITICAL: You MUST extract EVERY item from the text. Count carefully and do not miss any items. Do NOT include subtotals, taxes, totals, payment methods, or non-item lines.
 
-Compute unit_cost = line_total / (qty * pack_size) if pack size exists, else line_total / qty.
+Do NOT compute unit_cost — only extract raw qty, pack_size, and line_total exactly as printed.
 For normalized names, use format: {Brand/Product} – {Flavor/Variant}`;
 
 const NORMALIZE_TOOL = {
