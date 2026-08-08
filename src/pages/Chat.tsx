@@ -207,7 +207,7 @@ export default function Chat() {
           user_id: user.id,
           pdf_url: filePath,
           receipt_date: today,
-          vendor: "other" as const,
+          vendor: "sams" as const,
           parse_status: "PENDING" as const,
         })
         .select()
@@ -259,7 +259,7 @@ export default function Chat() {
         setMessages(prev => [
           ...prev.filter(m => !m.isUploading),
           { role: "user", content: `📎 Uploaded: ${file.name}` },
-          { role: "assistant", content: "I couldn't read that receipt. Try a clearer photo or PDF." },
+          { role: "assistant", content: "I couldn't read that receipt. Try a clearer photo or PDF, and make sure it's a Sam's Club or Walmart receipt." },
         ]);
         return;
       }

@@ -99,7 +99,7 @@ export default function ReceiptDetail() {
               </div>
             ) : (
               <CardTitle className="text-lg capitalize flex items-center gap-1 cursor-pointer" onClick={() => { setStoreValue(receipt.store_location || ""); setEditingStore(true); }}>
-                {cleanStoreDisplay(receipt.store_location || (receipt.vendor === "sams" ? "Sam's Club" : receipt.vendor === "walmart" ? "Walmart" : "Unknown Store"))}
+                {cleanStoreDisplay(receipt.vendor === "sams" ? "Sam's Club" : receipt.vendor === "walmart" ? "Walmart" : (receipt.store_location || "Unknown Store"))}
                 <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
               </CardTitle>
             )}
@@ -155,16 +155,14 @@ export default function ReceiptDetail() {
         <p className="text-sm text-muted-foreground">No items parsed yet.</p>
       ) : (
         <div className="space-y-2">
-          {items.map((item) => {
-            const displayUnit = Number(item.line_total) / ((item.qty || 1) * (item.pack_size || 1));
-            return (
+          {items.map((item) => (
             <Card key={item.id} className="border-0 shadow-sm">
               <CardContent className="p-3">
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
                     <p className={`font-medium text-sm ${item.sku_id ? "cursor-pointer underline decoration-dotted" : ""}`} onClick={() => item.sku_id && openSKUDetail(item.sku_id)}>{item.normalized_name || item.raw_name}</p>
                     <p className="text-xs text-muted-foreground">
-                      Qty: {item.qty}{item.pack_size ? ` × ${item.pack_size}pk` : ""} · Unit: ${displayUnit.toFixed(2)}
+                      Qty: {item.qty}{item.pack_size ? ` × ${item.pack_size}pk` : ""} · Unit: ${Number(item.unit_cost || 0).toFixed(2)}
                     </p>
                   </div>
                   <div className="text-right">
@@ -174,7 +172,7 @@ export default function ReceiptDetail() {
                 </div>
               </CardContent>
             </Card>
-          );})}
+          ))}
         </div>
       )}
 

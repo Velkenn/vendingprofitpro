@@ -94,11 +94,10 @@ export default function Stats() {
         .from("receipt_items")
         .select(`
           *,
-          skus!inner(sku_name, sell_price, default_is_personal),
+          skus(sku_name, sell_price),
           receipts!inner(receipt_date, vendor, store_location)
         `)
-        .eq("is_personal", false)
-        .eq("skus.default_is_personal", false),
+        .eq("is_personal", false),
       supabase
         .from("machine_sales")
         .select("id, date, cash_amount, credit_amount")

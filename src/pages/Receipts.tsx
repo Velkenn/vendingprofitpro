@@ -167,7 +167,7 @@ export default function Receipts() {
       if (uploadError) throw uploadError;
       const { data: newReceipt, error: dbError } = await supabase
         .from("receipts")
-        .insert({ user_id: user.id, vendor: "other" as const, receipt_date: new Date().toISOString().split("T")[0], parse_status: "PENDING" as const, pdf_url: filePath })
+        .insert({ user_id: user.id, vendor: "sams" as const, receipt_date: new Date().toISOString().split("T")[0], parse_status: "PENDING" as const, pdf_url: filePath })
         .select().single();
       if (dbError) throw dbError;
       setUploadReceipt(newReceipt);
@@ -508,7 +508,7 @@ export default function Receipts() {
                               <CardContent className="flex items-center gap-3 p-4">
                                 <div className="flex-1">
                                   <div className="flex items-center gap-2">
-                                    <p className="font-medium capitalize">{cleanStoreDisplay(r.store_location || (r.vendor === "sams" ? "Sam's Club" : r.vendor === "walmart" ? "Walmart" : "Unknown Store"))}</p>
+                                    <p className="font-medium capitalize">{cleanStoreDisplay(r.vendor === "sams" ? "Sam's Club" : r.vendor === "walmart" ? "Walmart" : (r.store_location || "Unknown Store"))}</p>
                                     {isImported && <Badge variant="outline" className="text-[10px] px-1.5 py-0">Imported</Badge>}
                                   </div>
                                   <p className="text-xs text-muted-foreground">

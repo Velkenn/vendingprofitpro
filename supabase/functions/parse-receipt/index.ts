@@ -531,7 +531,7 @@ Items typically appear as product descriptions with quantities and prices. Look 
 
 CRITICAL: You MUST extract EVERY item from the text. Count carefully and do not miss any items. Do NOT include subtotals, taxes, totals, payment methods, or non-item lines.
 
-Do NOT compute unit_cost — only extract raw qty, pack_size, and line_total exactly as printed.
+Compute unit_cost = line_total / (qty * pack_size) if pack size exists, else line_total / qty.
 For normalized names, use format: {Brand/Product} – {Flavor/Variant}`;
 
 const NORMALIZE_TOOL = {
@@ -700,33 +700,6 @@ async function parseWithUserProvider(
     return fc.functionCall.args;
   }
 
-  if (provider === "lovable") {
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: buildUserPrompt(rawText) },
-        ],
-        tools: [EXTRACT_TOOL],
-        tool_choice: { type: "function", function: { name: "extract_receipt" } },
-      }),
-    });
-    if (!res.ok) {
-      const t = await res.text();
-      throw new Error(`AI_ERROR:${res.status}:${t}`);
-    }
-    const result = await res.json();
-    const toolCall = result.choices?.[0]?.message?.tool_calls?.[0];
-    if (!toolCall) throw new Error("AI did not return structured data");
-    return parseToolCallResult(toolCall);
-  }
-
   throw new Error(`Unknown provider: ${provider}`);
 }
 
@@ -882,39 +855,6 @@ async function parseImageWithUserProvider(
     return fc.functionCall.args;
   }
 
-  if (provider === "lovable") {
-    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          {
-            role: "user",
-            content: [
-              { type: "image_url", image_url: { url: `data:${mimeType};base64,${base64Data}` } },
-              { type: "text", text: userPrompt },
-            ],
-          },
-        ],
-        tools: [EXTRACT_TOOL],
-        tool_choice: { type: "function", function: { name: "extract_receipt" } },
-      }),
-    });
-    if (!res.ok) {
-      const t = await res.text();
-      throw new Error(`AI_ERROR:${res.status}:${t}`);
-    }
-    const result = await res.json();
-    const toolCall = result.choices?.[0]?.message?.tool_calls?.[0];
-    if (!toolCall) throw new Error("AI did not return structured data");
-    return parseToolCallResult(toolCall);
-  }
-
   throw new Error(`Unknown provider: ${provider}`);
 }
 
@@ -1035,31 +975,6 @@ async function normalizeNamesWithAI(
           result.set(n.raw_name.toLowerCase(), n.normalized_name);
         }
       }
-    } else if (provider === "lovable") {
-      const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: prompt },
-          ],
-          tools: [NORMALIZE_TOOL],
-          tool_choice: { type: "function", function: { name: "normalize_names" } },
-        }),
-      });
-      if (!res.ok) { console.error("Normalize AI error:", await res.text()); return result; }
-      const data = await res.json();
-      const toolCall = data.choices?.[0]?.message?.tool_calls?.[0];
-      if (toolCall) {
-        const parsed = parseToolCallResult(toolCall);
-        if (parsed?.names) {
-          for (const n of parsed.names) {
-            result.set(n.raw_name.toLowerCase(), n.normalized_name);
-          }
-        }
-      }
     }
   } catch (e) {
     console.error("Name normalization failed:", e);
@@ -1145,38 +1060,19 @@ serve(async (req) => {
       });
     }
 
-    let aiConfig = await getUserAIConfig(supabase, receiptForAI.user_id, encryptionKey);
-
-    // Fallback to Lovable AI gateway when the user has no provider configured
-    if (!aiConfig) {
-      const lovableKey = Deno.env.get("LOVABLE_API_KEY");
-      if (lovableKey) {
-        aiConfig = {
-          provider: "lovable",
-          apiKey: lovableKey,
-          model: "google/gemini-2.5-flash",
-        };
-        console.log("Using Lovable AI gateway fallback (google/gemini-2.5-flash)");
-      }
-    }
-
+    const aiConfig = await getUserAIConfig(supabase, receiptForAI.user_id, encryptionKey);
     if (aiConfig && model_override) {
-      // For user providers, strip provider prefix (e.g. "google/gemini-2.5-flash" -> "gemini-2.5-flash").
-      // For the Lovable gateway, keep the full "vendor/model" identifier.
-      if (aiConfig.provider === "lovable") {
-        aiConfig.model = model_override;
-      } else {
-        const slashIdx = model_override.indexOf("/");
-        aiConfig.model = slashIdx !== -1 ? model_override.slice(slashIdx + 1) : model_override;
-      }
+      // Strip provider prefix (e.g. "google/gemini-2.5-flash" -> "gemini-2.5-flash")
+      const slashIdx = model_override.indexOf("/");
+      aiConfig.model = slashIdx !== -1 ? model_override.slice(slashIdx + 1) : model_override;
     }
     let parsed: any = null;
 
     if (imageFile) {
-      // IMAGE PATH: requires an AI provider with vision capabilities
+      // IMAGE PATH: requires AI provider with vision capabilities
       if (!aiConfig) {
         await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-        return new Response(JSON.stringify({ error: "Could not read this receipt. Try a clearer scan." }), {
+        return new Response(JSON.stringify({ error: "Image receipts require an AI provider. Please configure one in Settings → AI Settings." }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
@@ -1184,7 +1080,7 @@ serve(async (req) => {
       try {
         parsed = await retryTransientAIRequest(
           "Image receipt parse",
-          () => parseImageWithUserProvider(bytes, file_path, aiConfig!.provider, aiConfig!.apiKey, aiConfig!.model),
+          () => parseImageWithUserProvider(bytes, file_path, aiConfig.provider, aiConfig.apiKey, aiConfig.model),
         );
         console.log(`AI vision succeeded: ${parsed.items?.length || 0} items`);
         const outputEstimate = JSON.stringify(parsed).length;
@@ -1193,7 +1089,7 @@ serve(async (req) => {
         const msg = aiErr instanceof Error ? aiErr.message : String(aiErr);
         console.error("AI vision error:", msg);
         await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-        return buildAIErrorResponse(aiConfig.provider, msg, "Could not read this receipt. Try a clearer scan.");
+        return buildAIErrorResponse(aiConfig.provider, msg, "Image parsing failed");
       }
     } else {
       // PDF PATH: extract text first, then parse
@@ -1205,7 +1101,7 @@ serve(async (req) => {
       } catch (pdfErr) {
         console.error("PDF text extraction failed:", pdfErr);
         await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-        return new Response(JSON.stringify({ error: "Could not read this receipt. Try a clearer scan." }), {
+        return new Response(JSON.stringify({ error: "PDF text extraction failed. Please ensure the file is a valid PDF." }), {
           status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
@@ -1216,7 +1112,7 @@ serve(async (req) => {
         try {
           parsed = await retryTransientAIRequest(
             "PDF receipt parse",
-            () => parseWithUserProvider(rawText, aiConfig!.provider, aiConfig!.apiKey, aiConfig!.model),
+            () => parseWithUserProvider(rawText, aiConfig.provider, aiConfig.apiKey, aiConfig.model),
           );
           console.log(`AI succeeded: ${parsed.items?.length || 0} items`);
           const outputEstimate = JSON.stringify(parsed).length;
@@ -1225,25 +1121,30 @@ serve(async (req) => {
           const msg = aiErr instanceof Error ? aiErr.message : String(aiErr);
           console.error("AI error:", msg);
 
-          console.warn("AI failed, attempting regex fallback...");
-          const fallbackParsed = parseReceiptText(rawText);
-          if (fallbackParsed && fallbackParsed.items.length > 0) {
-            parsed = fallbackParsed;
-            console.log(`Regex fallback succeeded: ${parsed.items.length} items`);
+          if (isRetryableAIError(msg)) {
+            console.warn("AI remained unavailable after retries, attempting regex fallback...");
+            const fallbackParsed = parseReceiptText(rawText);
+            if (fallbackParsed && fallbackParsed.items.length > 0) {
+              parsed = fallbackParsed;
+              console.log(`Regex fallback succeeded: ${parsed.items.length} items`);
+            } else {
+              await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
+              return buildAIErrorResponse(aiConfig.provider, msg, "Parsing failed");
+            }
           } else {
             await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-            return buildAIErrorResponse(aiConfig.provider, msg, "Could not read this receipt. Try a clearer scan.");
+            return buildAIErrorResponse(aiConfig.provider, msg, "Parsing failed");
           }
         }
       } else {
-        console.log("No AI provider available, falling back to regex parser...");
+        console.log("No AI provider configured, falling back to regex parser...");
         parsed = parseReceiptText(rawText);
         if (parsed && parsed.items.length > 0) {
           console.log(`Regex parser found ${parsed.items.length} items`);
         } else {
           console.log("Regex parser found 0 items");
           await supabase.from("receipts").update({ parse_status: "FAILED" }).eq("id", receipt_id);
-          return new Response(JSON.stringify({ error: "Could not read this receipt. Try a clearer scan." }), {
+          return new Response(JSON.stringify({ error: "No AI provider configured and regex parsing failed. Please set up an AI provider in Settings → AI Settings." }), {
             status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
@@ -1316,17 +1217,15 @@ serve(async (req) => {
       // Fetch existing SKUs for this user FIRST (needed for normalization)
       const { data: existingSkus } = await supabase
         .from("skus")
-        .select("id, sku_name, default_is_personal")
+        .select("id, sku_name")
         .eq("user_id", receiptData.user_id);
 
       const skuByName = new Map<string, string>();
       const existingSkuNames: string[] = [];
-      const personalSkuIds = new Set<string>();
       if (existingSkus) {
         for (const sku of existingSkus) {
           skuByName.set(sku.sku_name.toLowerCase(), sku.id);
           existingSkuNames.push(sku.sku_name);
-          if (sku.default_is_personal) personalSkuIds.add(sku.id);
         }
       }
 
@@ -1421,26 +1320,16 @@ serve(async (req) => {
           }
         }
 
-        // Auto-flag as personal + skip review when the matched SKU is default-personal
-        if (matchedSkuId && personalSkuIds.has(matchedSkuId)) {
-          matchedIsPersonal = true;
-          needsReview = false;
-        }
-
-        const finalQty = item.qty || 1;
-        const finalPack = matchedPackSize && matchedPackSize > 0 ? matchedPackSize : 1;
-        const computedUnitCost = Math.round((Number(item.line_total) / (finalQty * finalPack)) * 100) / 100;
-
         itemsToInsert.push({
           receipt_id,
           user_id: receiptData.user_id,
           sku_id: matchedSkuId,
           raw_name: item.raw_name,
           normalized_name: normalizedName,
-          qty: finalQty,
+          qty: item.qty || 1,
           pack_size: matchedPackSize,
           pack_size_uom: item.pack_size_uom || null,
-          unit_cost: computedUnitCost,
+          unit_cost: item.unit_cost || null,
           line_total: item.line_total,
           is_personal: matchedIsPersonal,
           needs_review: needsReview,

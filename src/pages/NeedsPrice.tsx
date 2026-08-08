@@ -23,7 +23,6 @@ export default function NeedsPrice() {
       .from("skus")
       .select("*")
       .is("sell_price", null)
-      .eq("default_is_personal", false)
       .order("sku_name")
       .then(({ data }) => {
         setSkus(data || []);
