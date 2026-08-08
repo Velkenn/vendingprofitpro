@@ -44,11 +44,6 @@ function isRetryableAIError(message: string): boolean {
   return code === 500 || code === 503;
 }
 
-function canFallbackToLocalParser(message: string): boolean {
-  const code = getAIErrorCode(message);
-  return code === 429 || code === 500 || code === 503;
-}
-
 async function retryTransientAIRequest<T>(
   label: string,
   fn: () => Promise<T>,
@@ -1126,8 +1121,8 @@ serve(async (req) => {
           const msg = aiErr instanceof Error ? aiErr.message : String(aiErr);
           console.error("AI error:", msg);
 
-          if (canFallbackToLocalParser(msg)) {
-            console.warn("AI is rate limited or unavailable, attempting regex fallback...");
+          if (isRetryableAIError(msg)) {
+            console.warn("AI remained unavailable after retries, attempting regex fallback...");
             const fallbackParsed = parseReceiptText(rawText);
             if (fallbackParsed && fallbackParsed.items.length > 0) {
               parsed = fallbackParsed;
