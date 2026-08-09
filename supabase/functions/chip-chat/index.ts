@@ -696,6 +696,7 @@ serve(async (req) => {
         const { data: prevItems } = await supabase
           .from("receipt_items")
           .select("sku_id, unit_cost, receipt_id, receipts!inner(receipt_date, store_location, vendor)")
+          .eq("user_id", user.id)
           .in("sku_id", skuIds)
           .neq("receipt_id", receipt_context.receipt_id)
           .order("created_at", { ascending: false })
