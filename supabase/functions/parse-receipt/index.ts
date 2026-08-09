@@ -1027,6 +1027,47 @@ serve(async (req) => {
     const encryptionKey = Deno.env.get("AI_ENCRYPTION_KEY") || "";
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // ─── AUTH: require a valid JWT and receipt ownership ───
+    const authHeader = req.headers.get("Authorization") || "";
+    const token = authHeader.replace("Bearer ", "").trim();
+    if (!token) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (typeof receipt_id !== "string" || typeof file_path !== "string") {
+      return new Response(JSON.stringify({ error: "Invalid request" }), {
+        status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const { data: ownedReceipt } = await supabase
+      .from("receipts")
+      .select("id, user_id")
+      .eq("id", receipt_id)
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (!ownedReceipt) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Files must live under the caller's own storage folder
+    if (!file_path.startsWith(`${user.id}/`)) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
+        status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     // Download the PDF
     const { data: fileData, error: downloadError } = await supabase.storage
       .from("receipts")
