@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { DollarSign, Plus, MapPin, CreditCard, Banknote, ChevronLeft, ChevronRight } from "lucide-react";
-import { startOfWeek, startOfMonth, startOfYear, endOfWeek, endOfMonth, endOfYear, isAfter, isBefore, subWeeks, subMonths, subYears, format } from "date-fns";
+import { startOfWeek, startOfMonth, startOfYear, endOfWeek, endOfMonth, endOfYear, isAfter, isBefore, subWeeks, subMonths, subYears, format, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 
@@ -103,7 +103,7 @@ export default function Machines() {
 
   const filteredSales = sales.filter((s) => {
     if (!range) return true;
-    const d = new Date(s.date);
+    const d = parseISO(s.date);
     return !isBefore(d, range.start) && !isAfter(d, range.end);
   });
 

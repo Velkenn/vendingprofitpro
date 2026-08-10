@@ -226,7 +226,7 @@ export default function Index() {
         .insert({
           user_id: user.id,
           vendor: "sams" as const,
-          receipt_date: new Date().toISOString().split("T")[0],
+          receipt_date: format(new Date(), "yyyy-MM-dd"),
           parse_status: "PENDING" as const,
           pdf_url: filePath,
         })
