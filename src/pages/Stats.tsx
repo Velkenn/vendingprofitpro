@@ -189,7 +189,7 @@ export default function Stats() {
     const range = getFilterRange(timeFilter, periodOffset);
     if (!range) return items;
     return items.filter(item => {
-      const d = new Date(item.receipts.receipt_date);
+      const d = parseISO(item.receipts.receipt_date);
       return !isBefore(d, range.start) && !isAfter(d, range.end);
     });
   };
@@ -422,7 +422,7 @@ export default function Stats() {
     const range = getFilterRange(timeFilter, periodOffset);
     if (!range) return machineSales;
     return machineSales.filter(s => {
-      const d = new Date(s.date);
+      const d = parseISO(s.date);
       return !isBefore(d, range.start) && !isAfter(d, range.end);
     });
   })();

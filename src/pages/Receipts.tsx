@@ -167,7 +167,7 @@ export default function Receipts() {
       if (uploadError) throw uploadError;
       const { data: newReceipt, error: dbError } = await supabase
         .from("receipts")
-        .insert({ user_id: user.id, vendor: "sams" as const, receipt_date: new Date().toISOString().split("T")[0], parse_status: "PENDING" as const, pdf_url: filePath })
+        .insert({ user_id: user.id, vendor: "sams" as const, receipt_date: format(new Date(), "yyyy-MM-dd"), parse_status: "PENDING" as const, pdf_url: filePath })
         .select().single();
       if (dbError) throw dbError;
       setUploadReceipt(newReceipt);

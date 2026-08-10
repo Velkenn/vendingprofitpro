@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { AlertTriangle, ArrowLeft, Banknote, CreditCard, DollarSign, Download, Plus, Search, Trash2, ChevronLeft, ChevronRight } from "lucide-react";
-import { startOfWeek, startOfMonth, startOfYear, endOfWeek, endOfMonth, endOfYear, isAfter, isBefore, subWeeks, subMonths, subYears, format, differenceInDays } from "date-fns";
+import { startOfWeek, startOfMonth, startOfYear, endOfWeek, endOfMonth, endOfYear, isAfter, isBefore, subWeeks, subMonths, subYears, format, differenceInDays, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
 import { toast } from "@/hooks/use-toast";
 import { useSKUDetail } from "@/contexts/SKUDetailContext";
@@ -126,7 +126,7 @@ export default function MachineDetail() {
   const range = getFilterRange(timeFilter, periodOffset, weekStartDay);
   const filteredSales = sales.filter((s) => {
     if (!range) return true;
-    const d = new Date(s.date);
+    const d = parseISO(s.date);
     return !isBefore(d, range.start) && !isAfter(d, range.end);
   });
 
@@ -137,7 +137,7 @@ export default function MachineDetail() {
   const creditPct = totalRevenue > 0 ? 100 - cashPct : 0;
 
   // Warning: no sales in 7 days
-  const lastSaleDate = sales.length > 0 ? new Date(sales[0].date) : null;
+  const lastSaleDate = sales.length > 0 ? parseISO(sales[0].date) : null;
   const showWarning = lastSaleDate ? differenceInDays(new Date(), lastSaleDate) > 7 : sales.length > 0;
 
   const handleLogSale = async () => {
@@ -382,7 +382,7 @@ export default function MachineDetail() {
                       className="w-full flex items-center justify-between py-1.5 border-b border-border last:border-0 text-left hover:bg-muted/50 rounded px-1 transition-colors"
                     >
                       <div>
-                        <p className="text-xs font-medium">{format(new Date(s.date), "MMM d, yyyy")}</p>
+                        <p className="text-xs font-medium">{format(parseISO(s.date), "MMM d, yyyy")}</p>
                         <p className="text-xs text-muted-foreground">
                           Cash: ${Number(s.cash_amount).toFixed(2)} · Credit: ${Number(s.credit_amount).toFixed(2)}
                         </p>

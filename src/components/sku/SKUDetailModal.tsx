@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { X, Pencil, Trash2, Save } from "lucide-react";
-import { format } from "date-fns";
+import { format, parseISO } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import type { Tables } from "@/integrations/supabase/types";
 
@@ -108,7 +108,7 @@ export default function SKUDetailModal({ skuId, open, onClose }: Props) {
         };
       });
 
-      entries.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      entries.sort((a, b) => parseISO(b.date).getTime() - parseISO(a.date).getTime());
       setPurchases(entries);
       setSummary({
         total_units: totalUnits,
@@ -244,7 +244,7 @@ export default function SKUDetailModal({ skuId, open, onClose }: Props) {
                             {editingId === p.id ? (
                               <div className="space-y-2">
                                 <p className="text-xs font-medium text-muted-foreground">
-                                  {format(new Date(p.date), "MMM d, yyyy")}
+                                  {format(parseISO(p.date), "MMM d, yyyy")}
                                 </p>
                                 <div className="grid grid-cols-3 gap-2">
                                   <div>
@@ -276,7 +276,7 @@ export default function SKUDetailModal({ skuId, open, onClose }: Props) {
                               <div className="flex items-center justify-between cursor-pointer" onClick={() => startEdit(p)}>
                                 <div>
                                   <p className="text-xs font-medium">
-                                    {format(new Date(p.date), "MMM d, yyyy")}
+                                    {format(parseISO(p.date), "MMM d, yyyy")}
                                     <span className="ml-1.5 font-normal text-muted-foreground">
                                       {shortStore(p.store_location, p.vendor)}
                                     </span>
@@ -317,7 +317,7 @@ export default function SKUDetailModal({ skuId, open, onClose }: Props) {
                           <CardContent className="flex items-center justify-between p-3">
                             <div>
                               <p className="text-xs font-medium">
-                                {format(new Date(p.date), "MMM d, yyyy")}
+                                {format(parseISO(p.date), "MMM d, yyyy")}
                               </p>
                               <p className="text-xs text-muted-foreground">
                                 Rev {p.revenue != null ? fmt(p.revenue) : "—"} · Cost {fmt(p.line_total)}
