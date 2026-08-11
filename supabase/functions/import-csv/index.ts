@@ -532,6 +532,18 @@ serve(async (req) => {
           }
         }
 
+        // 4. Remembered pack size for this SKU beats a fresh guess (alias override wins)
+        let finalUnitCost = Math.round(unitCost * 100) / 100;
+        if (matchedSkuId && !aliasPackOverride) {
+          const remembered = skuPackSizeMap.get(matchedSkuId);
+          if (remembered && remembered !== matchedPackSize) {
+            console.log(`Pack size memory: "${row.product_name}" guessed=${matchedPackSize ?? "none"} remembered=${remembered}`);
+            matchedPackSize = remembered;
+            const divisor = row.units * remembered;
+            if (divisor > 0) finalUnitCost = Math.round((row.total_cost / divisor) * 100) / 100;
+          }
+        }
+
         itemsToInsert.push({
           receipt_id: newReceipt.id,
           user_id: userId,
@@ -539,12 +551,13 @@ serve(async (req) => {
           raw_name: row.product_name,
           normalized_name: normalizedName,
           qty: row.units,
-          unit_cost: Math.round(unitCost * 100) / 100,
+          unit_cost: finalUnitCost,
           line_total: row.total_cost,
           is_personal: matchedIsPersonal,
           needs_review: needsReview,
         });
       }
+
 
       if (itemsToInsert.length > 0) {
         await supabase.from("receipt_items").insert(itemsToInsert);
