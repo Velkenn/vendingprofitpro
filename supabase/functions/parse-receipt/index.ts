@@ -1306,6 +1306,7 @@ serve(async (req) => {
         let matchedPackSize = item.pack_size || null;
         let matchedIsPersonal = false;
         let needsReview = true;
+        let aliasPackOverride = false;
 
         // 1. Check aliases
         if (aliases) {
@@ -1315,13 +1316,17 @@ serve(async (req) => {
               const rawName = item.raw_name.toLowerCase();
               if (rawName.includes(pattern) || pattern.includes(rawName)) {
                 matchedSkuId = alias.sku_id;
-                if (alias.pack_size_override) matchedPackSize = alias.pack_size_override;
+                if (alias.pack_size_override) {
+                  matchedPackSize = alias.pack_size_override;
+                  aliasPackOverride = true;
+                }
                 needsReview = false;
                 break;
               }
             }
           }
         }
+
 
         // 2. Check previously reviewed items
         if (needsReview) {
