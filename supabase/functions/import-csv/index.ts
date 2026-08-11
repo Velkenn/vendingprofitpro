@@ -456,6 +456,8 @@ serve(async (req) => {
         let matchedSkuId: string | null = null;
         let matchedIsPersonal = false;
         let needsReview = true;
+        let matchedPackSize: number | null = null;
+        let aliasPackOverride = false;
 
         // 1. Check aliases
         if (aliases) {
@@ -464,11 +466,16 @@ serve(async (req) => {
             const rawLower = row.product_name.toLowerCase();
             if (rawLower.includes(pattern) || pattern.includes(rawLower)) {
               matchedSkuId = alias.sku_id;
+              if (alias.pack_size_override) {
+                matchedPackSize = alias.pack_size_override;
+                aliasPackOverride = true;
+              }
               needsReview = false;
               break;
             }
           }
         }
+
 
         // 2. Check previously reviewed items
         if (needsReview) {
