@@ -494,6 +494,18 @@ export default function Stats() {
         <h1 className="text-2xl font-bold tracking-tight">Business Stats</h1>
       </div>
 
+      {loadError && (
+        <Card className="border-destructive bg-destructive/10">
+          <CardHeader className="pb-1">
+            <CardTitle className="text-base text-destructive">Failed to load stats data</CardTitle>
+          </CardHeader>
+          <CardContent className="p-4 pt-0">
+            <p className="text-sm text-destructive break-words">{loadError}</p>
+          </CardContent>
+        </Card>
+      )}
+
+
       {/* Time Filters */}
       <div className="space-y-2">
         <div className="grid grid-cols-4 gap-1 rounded-lg bg-muted p-1">
