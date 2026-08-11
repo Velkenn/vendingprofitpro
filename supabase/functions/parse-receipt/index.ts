@@ -1372,6 +1372,24 @@ serve(async (req) => {
           }
         }
 
+        // 4. Remembered pack size for this SKU always beats a fresh guess
+        // (but never overrides an explicit alias pack_size_override)
+        let finalUnitCost = item.unit_cost ?? null;
+        if (matchedSkuId && !aliasPackOverride) {
+          const remembered = skuPackSizeMap.get(matchedSkuId);
+          if (remembered && remembered !== matchedPackSize) {
+            console.log(
+              `Pack size memory: "${item.raw_name}" guessed=${matchedPackSize ?? "none"} remembered=${remembered}`
+            );
+            matchedPackSize = remembered;
+            const qty = item.qty || 1;
+            const divisor = qty * remembered;
+            if (divisor > 0 && typeof item.line_total === "number") {
+              finalUnitCost = Math.round((item.line_total / divisor) * 100) / 100;
+            }
+          }
+        }
+
         itemsToInsert.push({
           receipt_id,
           user_id: receiptData.user_id,
@@ -1381,7 +1399,8 @@ serve(async (req) => {
           qty: item.qty || 1,
           pack_size: matchedPackSize,
           pack_size_uom: item.pack_size_uom || null,
-          unit_cost: item.unit_cost || null,
+          unit_cost: finalUnitCost || null,
+
           line_total: item.line_total,
           is_personal: matchedIsPersonal,
           needs_review: needsReview,
