@@ -385,12 +385,15 @@ serve(async (req) => {
       .eq("user_id", userId).eq("needs_review", false).not("sku_id", "is", null)
       .order("created_at", { ascending: false });
     const reviewedMap = new Map<string, { sku_id: string; is_personal: boolean; pack_size: number | null }>();
+    const skuPackSizeMap = new Map<string, number>();
     if (reviewedItems) {
       for (const ri of reviewedItems) {
         const key = ri.raw_name.toLowerCase();
         if (!reviewedMap.has(key)) reviewedMap.set(key, { sku_id: ri.sku_id!, is_personal: ri.is_personal, pack_size: ri.pack_size });
+        if (ri.sku_id && ri.pack_size && !skuPackSizeMap.has(ri.sku_id)) skuPackSizeMap.set(ri.sku_id, ri.pack_size);
       }
     }
+
 
     // Fetch aliases
     const { data: aliases } = await supabase
