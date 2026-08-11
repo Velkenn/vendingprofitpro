@@ -63,6 +63,7 @@ export default function Stats() {
   const [items, setItems] = useState<ReceiptItemWithJoins[]>([]);
   const [machineSales, setMachineSales] = useState<MachineSale[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("lifetime");
   const [periodOffset, setPeriodOffset] = useState(0);
   const [selectedStore, setSelectedStore] = useState<string | null>(null);
