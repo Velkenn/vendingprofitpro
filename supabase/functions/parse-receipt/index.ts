@@ -1245,14 +1245,20 @@ serve(async (req) => {
       .order("created_at", { ascending: false });
 
     const reviewedMap = new Map<string, { sku_id: string; is_personal: boolean; pack_size: number | null }>();
+    const skuPackSizeMap = new Map<string, number>();
     if (reviewedItems) {
       for (const ri of reviewedItems) {
         const key = ri.raw_name.toLowerCase();
         if (!reviewedMap.has(key)) {
           reviewedMap.set(key, { sku_id: ri.sku_id!, is_personal: ri.is_personal, pack_size: ri.pack_size });
         }
+        // Remember the most recent non-null pack size per SKU (rows ordered newest first)
+        if (ri.sku_id && ri.pack_size && !skuPackSizeMap.has(ri.sku_id)) {
+          skuPackSizeMap.set(ri.sku_id, ri.pack_size);
+        }
       }
     }
+
 
     if (extractedItems.length > 0) {
       // Fetch existing SKUs for this user FIRST (needed for normalization)
@@ -1300,6 +1306,7 @@ serve(async (req) => {
         let matchedPackSize = item.pack_size || null;
         let matchedIsPersonal = false;
         let needsReview = true;
+        let aliasPackOverride = false;
 
         // 1. Check aliases
         if (aliases) {
@@ -1309,13 +1316,17 @@ serve(async (req) => {
               const rawName = item.raw_name.toLowerCase();
               if (rawName.includes(pattern) || pattern.includes(rawName)) {
                 matchedSkuId = alias.sku_id;
-                if (alias.pack_size_override) matchedPackSize = alias.pack_size_override;
+                if (alias.pack_size_override) {
+                  matchedPackSize = alias.pack_size_override;
+                  aliasPackOverride = true;
+                }
                 needsReview = false;
                 break;
               }
             }
           }
         }
+
 
         // 2. Check previously reviewed items
         if (needsReview) {
@@ -1361,6 +1372,24 @@ serve(async (req) => {
           }
         }
 
+        // 4. Remembered pack size for this SKU always beats a fresh guess
+        // (but never overrides an explicit alias pack_size_override)
+        let finalUnitCost = item.unit_cost ?? null;
+        if (matchedSkuId && !aliasPackOverride) {
+          const remembered = skuPackSizeMap.get(matchedSkuId);
+          if (remembered && remembered !== matchedPackSize) {
+            console.log(
+              `Pack size memory: "${item.raw_name}" guessed=${matchedPackSize ?? "none"} remembered=${remembered}`
+            );
+            matchedPackSize = remembered;
+            const qty = item.qty || 1;
+            const divisor = qty * remembered;
+            if (divisor > 0 && typeof item.line_total === "number") {
+              finalUnitCost = Math.round((item.line_total / divisor) * 100) / 100;
+            }
+          }
+        }
+
         itemsToInsert.push({
           receipt_id,
           user_id: receiptData.user_id,
@@ -1370,7 +1399,8 @@ serve(async (req) => {
           qty: item.qty || 1,
           pack_size: matchedPackSize,
           pack_size_uom: item.pack_size_uom || null,
-          unit_cost: item.unit_cost || null,
+          unit_cost: finalUnitCost || null,
+
           line_total: item.line_total,
           is_personal: matchedIsPersonal,
           needs_review: needsReview,

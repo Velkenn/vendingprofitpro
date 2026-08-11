@@ -385,12 +385,15 @@ serve(async (req) => {
       .eq("user_id", userId).eq("needs_review", false).not("sku_id", "is", null)
       .order("created_at", { ascending: false });
     const reviewedMap = new Map<string, { sku_id: string; is_personal: boolean; pack_size: number | null }>();
+    const skuPackSizeMap = new Map<string, number>();
     if (reviewedItems) {
       for (const ri of reviewedItems) {
         const key = ri.raw_name.toLowerCase();
         if (!reviewedMap.has(key)) reviewedMap.set(key, { sku_id: ri.sku_id!, is_personal: ri.is_personal, pack_size: ri.pack_size });
+        if (ri.sku_id && ri.pack_size && !skuPackSizeMap.has(ri.sku_id)) skuPackSizeMap.set(ri.sku_id, ri.pack_size);
       }
     }
+
 
     // Fetch aliases
     const { data: aliases } = await supabase
@@ -453,6 +456,8 @@ serve(async (req) => {
         let matchedSkuId: string | null = null;
         let matchedIsPersonal = false;
         let needsReview = true;
+        let matchedPackSize: number | null = null;
+        let aliasPackOverride = false;
 
         // 1. Check aliases
         if (aliases) {
@@ -461,11 +466,16 @@ serve(async (req) => {
             const rawLower = row.product_name.toLowerCase();
             if (rawLower.includes(pattern) || pattern.includes(rawLower)) {
               matchedSkuId = alias.sku_id;
+              if (alias.pack_size_override) {
+                matchedPackSize = alias.pack_size_override;
+                aliasPackOverride = true;
+              }
               needsReview = false;
               break;
             }
           }
         }
+
 
         // 2. Check previously reviewed items
         if (needsReview) {
@@ -522,6 +532,18 @@ serve(async (req) => {
           }
         }
 
+        // 4. Remembered pack size for this SKU beats a fresh guess (alias override wins)
+        let finalUnitCost = Math.round(unitCost * 100) / 100;
+        if (matchedSkuId && !aliasPackOverride) {
+          const remembered = skuPackSizeMap.get(matchedSkuId);
+          if (remembered && remembered !== matchedPackSize) {
+            console.log(`Pack size memory: "${row.product_name}" guessed=${matchedPackSize ?? "none"} remembered=${remembered}`);
+            matchedPackSize = remembered;
+            const divisor = row.units * remembered;
+            if (divisor > 0) finalUnitCost = Math.round((row.total_cost / divisor) * 100) / 100;
+          }
+        }
+
         itemsToInsert.push({
           receipt_id: newReceipt.id,
           user_id: userId,
@@ -529,12 +551,13 @@ serve(async (req) => {
           raw_name: row.product_name,
           normalized_name: normalizedName,
           qty: row.units,
-          unit_cost: Math.round(unitCost * 100) / 100,
+          unit_cost: finalUnitCost,
           line_total: row.total_cost,
           is_personal: matchedIsPersonal,
           needs_review: needsReview,
         });
       }
+
 
       if (itemsToInsert.length > 0) {
         await supabase.from("receipt_items").insert(itemsToInsert);
