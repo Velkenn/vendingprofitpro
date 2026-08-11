@@ -612,6 +612,11 @@ export default function Stats() {
         </Card>
       </div>
 
+      <p className="text-xs text-muted-foreground">
+        Based on {items.length.toLocaleString()} line items
+      </p>
+
+
       {/* Store Spend Breakdown */}
       <Card>
         <CardHeader className="pb-1">
