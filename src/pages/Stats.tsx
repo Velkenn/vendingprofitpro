@@ -63,6 +63,7 @@ export default function Stats() {
   const [items, setItems] = useState<ReceiptItemWithJoins[]>([]);
   const [machineSales, setMachineSales] = useState<MachineSale[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [timeFilter, setTimeFilter] = useState<TimeFilter>("lifetime");
   const [periodOffset, setPeriodOffset] = useState(0);
   const [selectedStore, setSelectedStore] = useState<string | null>(null);
@@ -88,25 +89,66 @@ export default function Stats() {
 
   useEffect(() => {
     if (!user) return;
-    
-    Promise.all([
-      supabase
-        .from("receipt_items")
-        .select(`
-          *,
-          skus(sku_name, sell_price),
-          receipts!inner(receipt_date, vendor, store_location)
-        `)
-        .eq("is_personal", false),
-      supabase
-        .from("machine_sales")
-        .select("id, date, cash_amount, credit_amount")
-    ]).then(([itemsRes, salesRes]) => {
-      setItems((itemsRes.data as ReceiptItemWithJoins[]) || []);
-      setMachineSales((salesRes.data as MachineSale[]) || []);
-      setLoading(false);
-    });
+
+    const PAGE = 1000;
+    const MAX_ITERATIONS = 50;
+
+    const fetchAllItems = async () => {
+      const all: ReceiptItemWithJoins[] = [];
+      for (let i = 0; i < MAX_ITERATIONS; i++) {
+        const offset = i * PAGE;
+        const { data, error } = await supabase
+          .from("receipt_items")
+          .select(`
+            *,
+            skus(sku_name, sell_price),
+            receipts!inner(receipt_date, vendor, store_location)
+          `)
+          .eq("user_id", user.id)
+          .or("is_personal.is.null,is_personal.eq.false")
+          .order("created_at", { ascending: true })
+          .range(offset, offset + PAGE - 1);
+        if (error) throw error;
+        const batch = (data as ReceiptItemWithJoins[]) || [];
+        all.push(...batch);
+        if (batch.length < PAGE) break;
+      }
+      return all;
+    };
+
+    const fetchAllSales = async () => {
+      const all: MachineSale[] = [];
+      for (let i = 0; i < MAX_ITERATIONS; i++) {
+        const offset = i * PAGE;
+        const { data, error } = await supabase
+          .from("machine_sales")
+          .select("id, date, cash_amount, credit_amount")
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: true })
+          .range(offset, offset + PAGE - 1);
+        if (error) throw error;
+        const batch = (data as MachineSale[]) || [];
+        all.push(...batch);
+        if (batch.length < PAGE) break;
+      }
+      return all;
+    };
+
+    setLoadError(null);
+    Promise.all([fetchAllItems(), fetchAllSales()])
+      .then(([allItems, allSales]) => {
+        setItems(allItems);
+        setMachineSales(allSales);
+      })
+      .catch((err) => {
+        console.error("Stats data load failed:", err);
+        setItems([]);
+        setMachineSales([]);
+        setLoadError(err?.message ? String(err.message) : String(err));
+      })
+      .finally(() => setLoading(false));
   }, [user]);
+
 
   const getFilterRange = (filter: TimeFilter, offset: number): { start: Date; end: Date } | null => {
     if (filter === "lifetime") return null;
@@ -452,6 +494,18 @@ export default function Stats() {
         <h1 className="text-2xl font-bold tracking-tight">Business Stats</h1>
       </div>
 
+      {loadError && (
+        <Card className="border-destructive bg-destructive/10">
+          <CardHeader className="pb-1">
+            <CardTitle className="text-base text-destructive">Failed to load stats data</CardTitle>
+          </CardHeader>
+          <CardContent className="p-4 pt-0">
+            <p className="text-sm text-destructive break-words">{loadError}</p>
+          </CardContent>
+        </Card>
+      )}
+
+
       {/* Time Filters */}
       <div className="space-y-2">
         <div className="grid grid-cols-4 gap-1 rounded-lg bg-muted p-1">
@@ -569,6 +623,11 @@ export default function Stats() {
           </CardContent>
         </Card>
       </div>
+
+      <p className="text-xs text-muted-foreground">
+        Based on {items.length.toLocaleString()} line items
+      </p>
+
 
       {/* Store Spend Breakdown */}
       <Card>
